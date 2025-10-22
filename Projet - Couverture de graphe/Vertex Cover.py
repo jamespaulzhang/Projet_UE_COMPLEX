@@ -766,6 +766,278 @@ class Graph:
 
         return best_C, nodes_generated
     
+    def branchement_ameliore_v3(self):
+        """
+        Branchement amélioré version 3 : traitement spécial des sommets de degré 1
+        """
+        best_C = set(self.sommets())
+        initial_edges = self.aretes()
+        stack = [(initial_edges, set())]
+        nodes_generated = 0
+
+        while stack:
+            remaining_edges, current_solution = stack.pop()
+            nodes_generated += 1
+
+            # Élagage
+            if len(current_solution) >= len(best_C):
+                continue
+
+            # Traitement spécial des sommets de degré 1
+            modified = True
+            while modified and remaining_edges:
+                modified = False
+                # Calculer les degrés des sommets dans le graphe restant
+                degree = {}
+                for u, v in remaining_edges:
+                    degree[u] = degree.get(u, 0) + 1
+                    degree[v] = degree.get(v, 0) + 1
+                
+                # Chercher les sommets de degré 1
+                for vertex in list(degree.keys()):
+                    if degree.get(vertex, 0) == 1:
+                        # Trouver l'unique voisin de ce sommet
+                        neighbor = None
+                        for u, v in remaining_edges:
+                            if u == vertex:
+                                neighbor = v
+                                break
+                            elif v == vertex:
+                                neighbor = u
+                                break
+                        
+                        if neighbor is not None:
+                            # Ajouter le voisin à la solution (pas le sommet de degré 1)
+                            current_solution.add(neighbor)
+                            # Supprimer toutes les arêtes incidentes au voisin
+                            remaining_edges = [(x, y) for x, y in remaining_edges 
+                                            if x != neighbor and y != neighbor]
+                            modified = True
+                            break
+            
+            # Si pas d'arêtes restantes après traitement, mettre à jour la meilleure solution
+            if not remaining_edges:
+                if len(current_solution) < len(best_C):
+                    best_C = current_solution
+                continue
+
+            # Calculer le degré de chaque sommet dans le graphe actuel
+            degree = {}
+            for u, v in remaining_edges:
+                degree[u] = degree.get(u, 0) + 1
+                degree[v] = degree.get(v, 0) + 1
+
+            # Trouver l'arête avec le sommet de degré maximal
+            max_degree = -1
+            best_edge = None
+            for u, v in remaining_edges:
+                current_max = max(degree.get(u, 0), degree.get(v, 0))
+                if current_max > max_degree:
+                    max_degree = current_max
+                    best_edge = (u, v)
+
+            u, v = best_edge
+            
+            # S'assurer que u est le sommet avec le degré le plus élevé
+            if degree.get(v, 0) > degree.get(u, 0):
+                u, v = v, u
+
+            # Branche 1 : choisir le sommet de degré maximal u
+            edges1 = [(x, y) for x, y in remaining_edges if x != u and y != u]
+            sol1 = current_solution | {u}
+            if len(sol1) < len(best_C):
+                stack.append((edges1, sol1))
+
+            # Branche 2 : choisir v, et ne pas choisir u (donc doit choisir tous les voisins de u)
+            neighbors_u = set()
+            for x, y in remaining_edges:
+                if x == u and y != v:
+                    neighbors_u.add(y)
+                elif y == u and x != v:
+                    neighbors_u.add(x)
+            
+            sol2 = current_solution | {v} | neighbors_u
+            vertices_to_remove = {u, v} | neighbors_u
+            edges2 = [(x, y) for x, y in remaining_edges 
+                    if x not in vertices_to_remove and y not in vertices_to_remove]
+            
+            if len(sol2) < len(best_C):
+                stack.append((edges2, sol2))
+
+        return best_C, nodes_generated
+    
+    def heuristique_degre_ponderee(self, num_trials=50):
+        """
+        Heuristique de degré pondéré : choisit les sommets avec probabilité proportionnelle au degré
+        
+        Args:
+            num_trials: Nombre d'essais
+            
+        Returns:
+            set: Meilleure couverture trouvée
+        """
+        best_cover = set(self.sommets())
+        best_size = len(best_cover)
+        
+        for _ in range(num_trials):
+            cover = set()
+            G_temp = self.copy()
+            
+            while G_temp.aretes():
+                # Calculer les degrés
+                degrees = G_temp.degrees_dict()
+                total_degree = sum(degrees.values())
+                
+                if total_degree == 0:
+                    break
+                    
+                # Choisir un sommet avec probabilité proportionnelle au degré
+                rand_val = random.random()
+                cumulative_prob = 0
+                
+                for vertex, degree in degrees.items():
+                    prob = degree / total_degree
+                    cumulative_prob += prob
+                    if rand_val <= cumulative_prob:
+                        # Ajouter ce sommet à la couverture
+                        cover.add(vertex)
+                        G_temp.remove_vertices_inplace([vertex])
+                        break
+            
+            if len(cover) < best_size and self.est_couverture_valide(cover):
+                best_cover = cover
+                best_size = len(cover)
+        
+        return best_cover
+
+    def heuristique_recherche_locale(self, initial_cover=None, max_iter=1000):
+        """
+        Heuristique de recherche locale : améliore une solution initiale par recherche locale
+        
+        Args:
+            initial_cover: Couverture initiale (si None, utilise l'algorithme glouton)
+            max_iter: Nombre maximum d'itérations
+            
+        Returns:
+            set: Meilleure couverture trouvée
+        """
+        if initial_cover is None:
+            current_cover = self.algo_glouton()
+        else:
+            current_cover = set(initial_cover)
+        
+        best_cover = set(current_cover)
+        best_size = len(best_cover)
+        
+        vertices = self.sommets()
+        
+        for iteration in range(max_iter):
+            improved = False
+            
+            # Essayer de retirer un sommet
+            for v in list(current_cover):
+                if v in current_cover:
+                    temp_cover = current_cover - {v}
+                    if self.est_couverture_valide(temp_cover):
+                        current_cover = temp_cover
+                        improved = True
+                        break
+            
+            # Si pas d'amélioration, essayer d'échanger deux sommets
+            if not improved:
+                for v_in in list(current_cover):
+                    for v_out in vertices:
+                        if v_out not in current_cover:
+                            temp_cover = (current_cover - {v_in}) | {v_out}
+                            if self.est_couverture_valide(temp_cover) and len(temp_cover) <= len(current_cover):
+                                current_cover = temp_cover
+                                improved = True
+                                break
+                    if improved:
+                        break
+            
+            # Mettre à jour la meilleure solution
+            if len(current_cover) < best_size:
+                best_cover = set(current_cover)
+                best_size = len(best_cover)
+            
+            # Critère d'arrêt si pas d'amélioration après plusieurs itérations
+            if iteration > 50 and not improved:
+                break
+        
+        return best_cover
+
+    def heuristique_hybride(self):
+        """
+        Heuristique hybride : combine plusieurs méthodes
+        
+        Returns:
+            set: Meilleure couverture trouvée
+        """
+        # Générer plusieurs solutions avec différentes méthodes
+        solutions = []
+        
+        # 1. Algorithme glouton
+        solutions.append(self.algo_glouton())
+        
+        # 2. Algorithme de couplage
+        solutions.append(self.algo_couplage())
+        
+        # 3. Heuristique aléatoire (需要先定义这个方法)
+        if hasattr(self, 'heuristique_aleatoire'):
+            solutions.append(self.heuristique_aleatoire(num_trials=20))
+        else:
+            # 如果随机启发式方法不存在，使用贪心算法代替
+            solutions.append(self.algo_glouton())
+        
+        # 4. Heuristique de degré pondéré
+        solutions.append(self.heuristique_degre_ponderee(num_trials=20))
+        
+        # 5. Recherche locale sur chaque solution
+        improved_solutions = []
+        for sol in solutions:
+            improved = self.heuristique_recherche_locale(sol, max_iter=200)
+            improved_solutions.append(improved)
+        
+        # Retourner la meilleure solution
+        best_solution = min(improved_solutions, key=len)
+        return best_solution
+
+    def heuristique_aleatoire(self, num_trials=100):
+        """
+        Heuristique aléatoire : génère plusieurs couvertures aléatoires et garde la meilleure
+        
+        Args:
+            num_trials: Nombre d'essais aléatoires
+            
+        Returns:
+            set: Meilleure couverture trouvée
+        """
+        best_cover = set(self.sommets())
+        best_size = len(best_cover)
+        
+        for _ in range(num_trials):
+            # Générer une couverture aléatoire
+            cover = set()
+            remaining_edges = self.aretes()
+            
+            while remaining_edges:
+                # Choisir une arête aléatoire
+                u, v = random.choice(remaining_edges)
+                # Choisir aléatoirement un des deux sommets
+                if random.random() < 0.5:
+                    cover.add(u)
+                    remaining_edges = [(x, y) for x, y in remaining_edges if x != u and y != u]
+                else:
+                    cover.add(v)
+                    remaining_edges = [(x, y) for x, y in remaining_edges if x != v and y != v]
+            
+            if len(cover) < best_size and self.est_couverture_valide(cover):
+                best_cover = cover
+                best_size = len(cover)
+        
+        return best_cover
+   
     def __repr__(self):
         """Représentation textuelle du graphe."""
         return f"Graph({self.adj})"
@@ -798,10 +1070,6 @@ def generate_random_graph(n: int, p: float):
                 adj[j].append(i)
 
     return Graph(adj)
-
-# ===========================
-# Fonctions utilitaires
-# ===========================
 
 def mesure_algo(G, algo_name):
     """
@@ -846,10 +1114,6 @@ def mesure_temps_et_qualite(algo_name, n, p, num_instances=10):
         taille_list.append(taille)
     return sum(temps_list)/num_instances, sum(taille_list)/num_instances
 
-# ===========================
-# Recherche de Nmax
-# ===========================
-
 def trouver_Nmax(algo_name, p=0.3, seuil_sec=3):
     """
     Trouve la taille Nmax pour laquelle l'algorithme s'exécute en moins de seuil_sec secondes.
@@ -868,10 +1132,6 @@ def trouver_Nmax(algo_name, p=0.3, seuil_sec=3):
         if t > seuil_sec:
             return n
         n += 1
-
-# ===========================
-# Mesure et tracé
-# ===========================
 
 def tests_algos(p=0.3, num_instances=10):
     """
@@ -939,44 +1199,50 @@ def tests_algos(p=0.3, num_instances=10):
 
     return ns, temps_glouton, temps_couplage, taille_glouton, taille_couplage
 
-# Vérification par force brute pour petits graphes (n <= 20 à utiliser avec prudence)
 def bruteforce_vertex_cover(adj):
     """
-    Algorithme de force brute pour la couverture de sommets.
-    À n'utiliser que pour de petits graphes (n <= 20).
-    
-    Args:
-        adj: Liste d'adjacence du graphe
-        
-    Returns:
-        set: Couverture de sommets optimale
+    Algorithme de force brute pour trouver la couverture de sommets optimale.
+    Cette méthode examine systématiquement tous les sous-ensembles de sommets,
+    en commençant par les plus petits, jusqu'à trouver la plus petite couverture valide.
     """
-    # adj: dict[int,list[int]]
+    # Obtenir la liste triée des sommets
     V = sorted(adj.keys())
     m = len(V)
+    
+    # Construire la liste des arêtes (sans doublons)
     edges = [(u,v) for u in adj for v in adj[u] if u < v]
+    
+    # Initialiser les variables pour suivre la meilleure solution
     best = None
+    best_size = float('inf')
+    
+    # Explorer les sous-ensembles par taille croissante (de 0 à m)
     for r in range(0, m+1):
+        # Générer tous les sous-ensembles de taille r
         for subset in itertools.combinations(V, r):
             S = set(subset)
-            ok = True
-            for (u,v) in edges:
-                if u not in S and v not in S:
-                    ok = False
-                    break
-            if ok:
+            
+            # Vérifier si S est une couverture valide
+            # Une couverture est valide si chaque arête a au moins une extrémité dans S
+            valid = all(u in S or v in S for (u,v) in edges)
+            
+            # Si c'est une couverture valide et meilleure que la courante
+            if valid and len(S) < best_size:
                 best = S
-                return best  # première couverture minimale trouvée -> optimale
+                best_size = len(S)
+                # Pas besoin de continuer avec cette taille, on a trouvé une solution
+                break
+        
+        # Élagage: si on a trouvé une solution de taille r, inutile de chercher des tailles > r
+        if best_size <= r:
+            break
+            
     return best
 
-# ===========================
-# Tests pour la méthode de branchement
-# ===========================
 def tester_strategies_branchement(
     n_values, p_values_labels, 
     num_instances=3, max_time_par_instance=30, 
-    strategies_to_run=None
-):
+    strategies_to_run=None):
     """
     Teste différentes stratégies de branchement sur plusieurs instances
     """
@@ -988,10 +1254,10 @@ def tester_strategies_branchement(
     # Mapping des noms de stratégies vers les méthodes
     strategy_methods = {
         'simple': 'branchement_simple',
-        'couplage_borne': 'branchement_couplage_avec_borne',  # 修改这里
+        'couplage_borne': 'branchement_couplage_avec_borne',
         'glouton': 'branchement_avec_glouton_seulement', 
         'bornes': 'branchement_avec_bornes_seulement',
-        'couplage': 'branchement_avec_couplage_seulement',  # 修改这里
+        'couplage': 'branchement_avec_couplage_seulement',
         'glouton_borne': 'branchement_glouton_avec_borne'
     }
 
@@ -1061,8 +1327,8 @@ def mesurer_branchement_instance_return_nodes(n, p, methode='simple', max_time_p
     
     if methode == 'simple':
         result = G.branchement_simple()
-    elif methode == 'couplage_borne':  # 修改这里
-        result = G.branchement_couplage_avec_borne()  # 修改这里
+    elif methode == 'couplage_borne':
+        result = G.branchement_couplage_avec_borne()
     elif methode == 'test':
         result = G.branchement_avec_glouton_seulement()
     else:
@@ -1091,7 +1357,7 @@ def tester_branchement_sur_une_valeur_p_complet(
     Retourne un dict structuré similaire à avant.
     """
     if methods_to_run is None:
-        methods_to_run = ['simple', 'couplage_borne', 'test']  # 修改这里
+        methods_to_run = ['simple', 'couplage_borne', 'test']
 
     all_results = {}
     for n in n_values:
@@ -1119,14 +1385,14 @@ def tester_branchement_sur_une_valeur_p_complet(
                     except Exception as e:
                         all_results[key]['simple'].append({'time': None, 'nodes': None, 'size': None, 'valid': False, 'error': str(e)})
 
-                if 'couplage_borne' in methods_to_run:  # 修改这里
+                if 'couplage_borne' in methods_to_run:
                     t0 = time.time()
                     try:
-                        res_c = G.branchement_couplage_avec_borne()  # 修改这里
+                        res_c = G.branchement_couplage_avec_borne()
                         t1 = time.time()
                         cov_c, nodes_c = (res_c if isinstance(res_c, tuple) else (res_c, None))
                         valid_c = G.est_couverture_valide(cov_c)
-                        all_results[key]['couplage_borne'].append({  # 修改这里
+                        all_results[key]['couplage_borne'].append({
                             'time': t1 - t0, 'nodes': nodes_c, 'size': len(cov_c), 'valid': valid_c
                         })
                     except Exception as e:
@@ -1156,29 +1422,17 @@ def tracer_comparaison_strategies(all_results, strategies_to_plot=None, title_su
     # Extraire les clés et déterminer les stratégies à tracer
     keys = list(all_results.keys())
     ns = sorted({k[0] for k in keys})
-    ps = sorted({k[1] for k in keys})
+    ps_to_plot = [0.1, 0.3, 0.5, '1/sqrt']
     
     if strategies_to_plot is None:
         example_key = keys[0]
         strategies_to_plot = list(all_results[example_key].keys())
 
-    # Noms complets pour la légende
-    strategy_names = {
-        'simple': 'Branchement simple',
-        'couplage_borne': 'Avec couplage et bornes',
-        'glouton': 'Avec algorithme glouton', 
-        'bornes': 'Avec bornes inférieures',
-        'couplage': 'Avec couplage seulement',
-        'glouton_borne': 'Avec glouton et bornes'
-    }
-
-    strategy_colors = {
-        'simple': 'red', 
-        'couplage_borne': 'blue', 
-        'glouton': 'green', 
-        'bornes': 'orange',
-        'couplage': 'purple',
-        'glouton_borne': 'brown'
+    p_colors = {
+        0.1: 'blue',
+        0.3: 'orange',
+        0.5: 'green',
+        '1/sqrt': 'red'
     }
     
     p_markers = {
@@ -1188,114 +1442,328 @@ def tracer_comparaison_strategies(all_results, strategies_to_plot=None, title_su
         '1/sqrt': 'D'
     }
     
-    p_linestyles = {
-        0.1: '-',
-        0.3: '--',
-        0.5: '-.',
-        '1/sqrt': ':'
+    p_labels = {
+        0.1: 'p=0.1',
+        0.3: 'p=0.3',
+        0.5: 'p=0.5',
+        '1/sqrt': 'p=1/√n'
     }
 
-    # Créer les figures
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    ax_time, ax_nodes, ax_size, ax_ratio = axes.flatten()
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    ax1, ax2 = axes
 
-    for p in ps:
-        xs = []
-        data = {s: {'time': [], 'nodes': [], 'size': []} for s in strategies_to_plot}
-
-        for n in ns:
-            key = (n, p)
+    organized_data = {}
+    for p in ps_to_plot:
+        organized_data[p] = {'n': [], 'time': [], 'nodes': []}
+    
+    for n in ns:
+        for p in ps_to_plot:
+            if p == '1/sqrt':
+                actual_p = 1.0 / math.sqrt(n)
+            else:
+                actual_p = p
+                
+            key = (n, actual_p)
             if key not in all_results:
                 continue
-
+                
+            all_times = []
+            all_nodes = []
+            
             for strategy in strategies_to_plot:
                 records = all_results[key].get(strategy, [])
+                if records:
+                    time_vals = [r['time'] for r in records if r.get('time') is not None and r['time'] > 0]
+                    nodes_vals = [r['nodes'] for r in records if r.get('nodes') is not None]
+                    
+                    if time_vals:
+                        all_times.extend(time_vals)
+                    
+                    if nodes_vals:
+                        all_nodes.extend(nodes_vals)
+            
+            if all_times:
+                mean_time = sum(all_times) / len(all_times)
+                organized_data[p]['n'].append(n)
+                organized_data[p]['time'].append(mean_time)
                 
-                def mean_or_nan(lst, field):
-                    vals = [r[field] for r in lst if r.get(field) is not None]
-                    return float(sum(vals)) / len(vals) if vals else float('nan')
-                
-                data[strategy]['time'].append(mean_or_nan(records, 'time'))
-                data[strategy]['nodes'].append(mean_or_nan(records, 'nodes'))
-                data[strategy]['size'].append(mean_or_nan(records, 'size'))
+                if all_nodes:
+                    mean_nodes = sum(all_nodes) / len(all_nodes)
+                    organized_data[p]['nodes'].append(mean_nodes)
+                else:
+                    organized_data[p]['nodes'].append(float('nan'))
 
-            xs.append(n)
+    for p in ps_to_plot:
+        data = organized_data[p]
+        if not data['n']:
+            continue
+            
+        color = p_colors.get(p, 'black')
+        marker = p_markers.get(p, 'o')
+        label = p_labels.get(p, f'p={p}')
+        
+        sorted_data = sorted(zip(data['n'], data['time'], data['nodes']))
+        sorted_n = [item[0] for item in sorted_data]
+        sorted_time = [item[1] for item in sorted_data]
+        sorted_nodes = [item[2] for item in sorted_data]
+        
+        log_time = [math.log2(t) if t and t > 0 else float('nan') 
+                   for t in sorted_time]
 
-        for strategy in strategies_to_plot:
-            if strategy not in strategy_colors:
-                continue
-                
-            color = strategy_colors[strategy]
-            
-            marker = p_markers.get(p, 'o')
-            linestyle = p_linestyles.get(p, '-')
-            
-            if p == '1/sqrt':
-                p_label = '1/√n'
-            else:
-                p_label = f'{p:.3f}'
-            
-            label = f"{strategy_names.get(strategy, strategy)} (p={p_label})"
-            
-            # Temps
-            ax_time.plot(xs, data[strategy]['time'], color=color, marker=marker, 
-                        linestyle=linestyle, label=label)
-            
-            # Nœuds (échelle log)
-            log_nodes = [math.log(x) if x and x > 0 else float('nan') for x in data[strategy]['nodes']]
-            ax_nodes.plot(xs, log_nodes, color=color, marker=marker, 
-                         linestyle=linestyle, label=label)
-            
-            # Tailles
-            ax_size.plot(xs, data[strategy]['size'], color=color, marker=marker, 
-                        linestyle=linestyle, label=label)
-            
-            # Ratio par rapport à la méthode simple (si disponible)
-            if strategy != 'simple' and 'simple' in strategies_to_plot:
-                ratio_times = []
-                for i, t_simple in enumerate(data['simple']['time']):
-                    t_current = data[strategy]['time'][i]
-                    if t_simple > 0 and not math.isnan(t_simple) and not math.isnan(t_current):
-                        ratio_times.append(t_current / t_simple)
-                    else:
-                        ratio_times.append(float('nan'))
-                ax_ratio.plot(xs, ratio_times, color=color, marker=marker, 
-                             linestyle=linestyle, label=label)
+        ax1.plot(sorted_n, log_time, color=color, marker=marker, 
+                linestyle='-', label=label, linewidth=2, markersize=6)
+        
+        ax2.plot(sorted_n, sorted_nodes, color=color, marker=marker, 
+                linestyle='-', label=label, linewidth=2, markersize=6)
 
-    # Configurer les axes
-    ax_time.set_xlabel('n (nombre de sommets)')
-    ax_time.set_ylabel('Temps moyen (s)')
-    ax_time.set_title(f'Temps d\'exécution {title_suffix}')
-    ax_time.grid(True)
-    ax_time.legend(fontsize=8, bbox_to_anchor=(1.05, 1), loc='upper left')
+    # Configurer le premier graphique (semi-log)
+    ax1.set_xlabel('n (nombre de sommets)')
+    ax1.set_ylabel('log₂(temps en secondes)')
+    ax1.set_title(f'Semi-log: log₂(temps) vs n {title_suffix}')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=10, loc='best')
 
-    ax_nodes.set_xlabel('n (nombre de sommets)')
-    ax_nodes.set_ylabel('log(Nœuds générés)')
-    ax_nodes.set_title(f'Nœuds générés (échelle log) {title_suffix}')
-    ax_nodes.grid(True)
-    ax_nodes.legend(fontsize=8, bbox_to_anchor=(1.05, 1), loc='upper left')
-
-    ax_size.set_xlabel('n (nombre de sommets)')
-    ax_size.set_ylabel('Taille moyenne de la couverture')
-    ax_size.set_title(f'Qualité des solutions {title_suffix}')
-    ax_size.grid(True)
-    ax_size.legend(fontsize=8, bbox_to_anchor=(1.05, 1), loc='upper left')
-
-    ax_ratio.set_xlabel('n (nombre de sommets)')
-    ax_ratio.set_ylabel('Ratio de temps')
-    ax_ratio.set_title(f'Ratio de temps vs branchement simple {title_suffix}')
-    ax_ratio.grid(True)
-    ax_ratio.legend(fontsize=8, bbox_to_anchor=(1.05, 1), loc='upper left')
+    # Configurer le deuxième graphique (linéaire)
+    ax2.set_xlabel('n (nombre de sommets)')
+    ax2.set_ylabel('nœuds générés')
+    ax2.set_title(f'Nœuds générés vs n {title_suffix}')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=10, loc='best')
 
     plt.tight_layout()
     plt.show()
 
     # Afficher un résumé statistique
     print("\n=== RÉSUMÉ STATISTIQUE ===")
-    for strategy in strategies_to_plot:
-        print(f"\n{strategy_names.get(strategy, strategy)}:")
+    for p in ps_to_plot:
+        print(f"\n{p_labels.get(p, f'p={p}')}:")
         total_time = 0
         total_nodes = 0
+        count = 0
+        
+        for key in keys:
+            n, actual_p = key
+            if p == '1/sqrt':
+                expected_p = 1.0 / math.sqrt(n)
+                if abs(actual_p - expected_p) > 1e-10:
+                    continue
+            else:
+                if actual_p != p:
+                    continue
+            
+            for strategy in strategies_to_plot:
+                records = all_results[key].get(strategy, [])
+                for record in records:
+                    if record.get('time') is not None:
+                        total_time += record['time']
+                        count += 1
+                    if record.get('nodes') is not None:
+                        total_nodes += record['nodes']
+        
+        if count > 0:
+            avg_time = total_time / count
+            avg_nodes = total_nodes / count if count > 0 else 0
+            print(f"  Temps moyen: {avg_time:.4f}s")
+            print(f"  Nœuds moyens: {avg_nodes:.0f}")
+
+def tester_branchement_ameliores(n_values, p_values_labels, num_instances=3, max_time_par_instance=30):
+    """
+    Teste spécifiquement les trois versions améliorées du branchement
+    """
+    strategies_to_run = ['v1', 'v2', 'v3']
+    
+    strategy_methods = {
+        'v1': 'branchement_ameliore_v1',
+        'v2': 'branchement_ameliore_v2', 
+        'v3': 'branchement_ameliore_v3'
+    }
+    
+    strategy_names = {
+        'v1': 'Branchement amélioré v1',
+        'v2': 'Branchement amélioré v2 (degré max)',
+        'v3': 'Branchement amélioré v3 (degré 1)'
+    }
+
+    all_results = {}
+
+    for n in n_values:
+        for p_label in p_values_labels:
+            if p_label == '1/sqrt':
+                p = 1.0 / math.sqrt(n)
+            else:
+                p = float(p_label)
+            
+            key = (n, p)
+            all_results[key] = {s: [] for s in strategies_to_run}
+
+            for inst in range(num_instances):
+                G = generate_random_graph(n, p)
+                print(f"n={n}, p={p:.4f}, inst={inst+1}/{num_instances}")
+
+                for strategy in strategies_to_run:
+                    method_name = strategy_methods[strategy]
+                    method = getattr(G, method_name)
+                    
+                    t0 = time.time()
+                    try:
+                        coverage, nodes = method()
+                        t1 = time.time()
+                        
+                        valid = G.est_couverture_valide(coverage)
+                        timeout = (t1 - t0) > max_time_par_instance
+                        
+                        all_results[key][strategy].append({
+                            'time': t1 - t0,
+                            'nodes': nodes,
+                            'size': len(coverage),
+                            'valid': valid,
+                            'timeout': timeout
+                        })
+                        
+                    except Exception as e:
+                        all_results[key][strategy].append({
+                            'time': None, 'nodes': None, 'size': None, 
+                            'valid': False, 'error': str(e), 'timeout': False
+                        })
+
+    return all_results, strategy_names
+
+def tracer_comparaison_ameliores(all_results, strategy_names, title_suffix=""):
+    """
+    Trace la comparaison des trois versions améliorées du branchement
+    """
+    keys = list(all_results.keys())
+    ns = sorted({k[0] for k in keys})
+    
+    strategies_to_plot = list(strategy_names.keys())
+    
+    # Couleurs pour les différentes stratégies
+    strategy_colors = {
+        'v1': 'blue',
+        'v2': 'green', 
+        'v3': 'red'
+    }
+    
+    strategy_markers = {
+        'v1': 'o',
+        'v2': 's',
+        'v3': '^'
+    }
+
+    # Créer les figures
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    ax_time, ax_nodes, ax_size, ax_ratio = axes.flatten()
+
+    # Organiser les données par stratégie
+    organized_data = {s: {'n': [], 'time': [], 'nodes': [], 'size': []} for s in strategies_to_plot}
+
+    for n in ns:
+        for strategy in strategies_to_plot:
+            time_vals = []
+            node_vals = []
+            size_vals = []
+            
+            for p in [0.1, 0.3, 0.5, '1/sqrt']:
+                if p == '1/sqrt':
+                    actual_p = 1.0 / math.sqrt(n)
+                else:
+                    actual_p = p
+                    
+                key = (n, actual_p)
+                if key in all_results:
+                    records = all_results[key].get(strategy, [])
+                    for record in records:
+                        if record.get('time') is not None and record['time'] > 0:
+                            time_vals.append(record['time'])
+                        if record.get('nodes') is not None:
+                            node_vals.append(record['nodes'])
+                        if record.get('size') is not None:
+                            size_vals.append(record['size'])
+            
+            if time_vals:
+                organized_data[strategy]['n'].append(n)
+                organized_data[strategy]['time'].append(sum(time_vals) / len(time_vals))
+                organized_data[strategy]['nodes'].append(sum(node_vals) / len(node_vals) if node_vals else 0)
+                organized_data[strategy]['size'].append(sum(size_vals) / len(size_vals) if size_vals else 0)
+
+    # Tracer les données
+    for strategy in strategies_to_plot:
+        data = organized_data[strategy]
+        if not data['n']:
+            continue
+            
+        color = strategy_colors[strategy]
+        marker = strategy_markers[strategy]
+        label = strategy_names[strategy]
+        
+        # Trier les données par n
+        sorted_data = sorted(zip(data['n'], data['time'], data['nodes'], data['size']))
+        sorted_n = [item[0] for item in sorted_data]
+        sorted_time = [item[1] for item in sorted_data]
+        sorted_nodes = [item[2] for item in sorted_data]
+        sorted_size = [item[3] for item in sorted_data]
+        
+        # Temps d'exécution
+        ax_time.plot(sorted_n, sorted_time, color=color, marker=marker, 
+                    linestyle='-', label=label, linewidth=2, markersize=6)
+        
+        # Nœuds générés (échelle log)
+        log_nodes = [math.log(nodes) if nodes and nodes > 0 else 0 for nodes in sorted_nodes]
+        ax_nodes.plot(sorted_n, log_nodes, color=color, marker=marker,
+                     linestyle='-', label=label, linewidth=2, markersize=6)
+        
+        # Taille de la couverture
+        ax_size.plot(sorted_n, sorted_size, color=color, marker=marker,
+                    linestyle='-', label=label, linewidth=2, markersize=6)
+        
+        # Ratio par rapport à v1
+        if strategy != 'v1' and 'v1' in strategies_to_plot:
+            ratio_times = []
+            for i, t_v1 in enumerate(organized_data['v1']['time']):
+                if i < len(sorted_time):
+                    t_current = sorted_time[i]
+                    if t_v1 > 0 and t_current > 0:
+                        ratio_times.append(t_current / t_v1)
+                    else:
+                        ratio_times.append(float('nan'))
+            ax_ratio.plot(sorted_n, ratio_times, color=color, marker=marker,
+                         linestyle='-', label=label, linewidth=2, markersize=6)
+
+    # Configurer les axes
+    ax_time.set_xlabel('n (nombre de sommets)')
+    ax_time.set_ylabel('Temps moyen (s)')
+    ax_time.set_title(f'Temps d\'exécution {title_suffix}')
+    ax_time.grid(True, alpha=0.3)
+    ax_time.legend()
+
+    ax_nodes.set_xlabel('n (nombre de sommets)')
+    ax_nodes.set_ylabel('log(Nœuds générés)')
+    ax_nodes.set_title(f'Nœuds générés (échelle log) {title_suffix}')
+    ax_nodes.grid(True, alpha=0.3)
+    ax_nodes.legend()
+
+    ax_size.set_xlabel('n (nombre de sommets)')
+    ax_size.set_ylabel('Taille moyenne de la couverture')
+    ax_size.set_title(f'Qualité des solutions {title_suffix}')
+    ax_size.grid(True, alpha=0.3)
+    ax_size.legend()
+
+    ax_ratio.set_xlabel('n (nombre de sommets)')
+    ax_ratio.set_ylabel('Ratio de temps (vs v1)')
+    ax_ratio.set_title(f'Ratio de temps vs branchement amélioré v1 {title_suffix}')
+    ax_ratio.grid(True, alpha=0.3)
+    ax_ratio.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    # Afficher un résumé statistique
+    print("\n=== RÉSUMÉ STATISTIQUE DES BRANCHEMENTS AMÉLIORÉS ===")
+    for strategy in strategies_to_plot:
+        print(f"\n{strategy_names[strategy]}:")
+        total_time = 0
+        total_nodes = 0
+        total_size = 0
         count = 0
         
         for key in keys:
@@ -1303,41 +1771,864 @@ def tracer_comparaison_strategies(all_results, strategies_to_plot=None, title_su
             for record in records:
                 if record.get('time') is not None:
                     total_time += record['time']
-                    count += 1
                 if record.get('nodes') is not None:
                     total_nodes += record['nodes']
+                if record.get('size') is not None:
+                    total_size += record['size']
+                count += 1
         
         if count > 0:
             avg_time = total_time / count
-            avg_nodes = total_nodes / len(keys) if keys else 0
+            avg_nodes = total_nodes / count
+            avg_size = total_size / count
             print(f"  Temps moyen: {avg_time:.4f}s")
             print(f"  Nœuds moyens: {avg_nodes:.0f}")
+            print(f"  Taille moyenne de couverture: {avg_size:.2f}")
+
+def evaluer_qualite_approximation(n_values, p_values, num_instances=10):
+    """
+    Évalue expérimentalement le rapport d'approximation des algorithmes de couplage et glouton.
+    
+    Args:
+        n_values: Liste des tailles de graphes à tester
+        p_values: Liste des probabilités d'arêtes à tester
+        num_instances: Nombre d'instances par configuration
+        
+    Returns:
+        dict: Résultats détaillés pour chaque configuration
+    """
+    results = {}
+    
+    for n in n_values:
+        for p in p_values:
+            key = (n, p)
+            results[key] = {
+                'glouton_ratios': [],
+                'couplage_ratios': [],
+                'glouton_worst': 0,
+                'couplage_worst': 0,
+                'optimal_sizes': [],
+                'glouton_sizes': [],
+                'couplage_sizes': []
+            }
+            
+            print(f"Test n={n}, p={p}")
+            
+            for inst in range(num_instances):
+                # Générer un graphe aléatoire
+                G = generate_random_graph(n, p)
+                
+                # Calculer les couvertures avec les algorithmes approximatifs
+                couverture_glouton = G.algo_glouton()
+                couverture_couplage = G.algo_couplage()
+                
+                # Calculer la couverture optimale avec branchement (pour petits graphes)
+                if n <= 20:  # Limiter aux petits graphes pour la faisabilité
+                    couverture_optimale, _ = G.branchement_simple()
+                    taille_optimale = len(couverture_optimale)
+                else:
+                    # Pour les grands graphes, utiliser la plus petite des deux approximations comme référence
+                    taille_optimale = min(len(couverture_glouton), len(couverture_couplage))
+                
+                # Calculer les ratios d'approximation
+                if taille_optimale > 0:
+                    ratio_glouton = len(couverture_glouton) / taille_optimale
+                    ratio_couplage = len(couverture_couplage) / taille_optimale
+                else:
+                    ratio_glouton = 1.0
+                    ratio_couplage = 1.0
+                
+                # Mettre à jour les résultats
+                results[key]['glouton_ratios'].append(ratio_glouton)
+                results[key]['couplage_ratios'].append(ratio_couplage)
+                results[key]['optimal_sizes'].append(taille_optimale)
+                results[key]['glouton_sizes'].append(len(couverture_glouton))
+                results[key]['couplage_sizes'].append(len(couverture_couplage))
+                
+                # Mettre à jour les pires ratios
+                results[key]['glouton_worst'] = max(results[key]['glouton_worst'], ratio_glouton)
+                results[key]['couplage_worst'] = max(results[key]['couplage_worst'], ratio_couplage)
+    
+    return results
+
+def tracer_rapports_approximation(results, title_suffix=""):
+    """
+    Trace les rapports d'approximation en fonction de n
+    """
+    # Organiser les données par n et p
+    n_values = sorted({key[0] for key in results.keys()})
+    p_values = sorted({key[1] for key in results.keys()})
+    
+    # Créer les figures
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    ax1, ax2, ax3, ax4 = axes.flatten()
+    
+    # Couleurs pour différentes valeurs de p
+    p_colors = {
+        0.1: 'blue',
+        0.3: 'green',
+        0.5: 'red',
+        0.7: 'orange'
+    }
+    
+    p_markers = {
+        0.1: 'o',
+        0.3: 's',
+        0.5: '^',
+        0.7: 'D'
+    }
+    
+    # Préparer les données pour les graphiques
+    data_by_p = {}
+    for p in p_values:
+        data_by_p[p] = {
+            'n': [],
+            'glouton_mean': [],
+            'couplage_mean': [],
+            'glouton_worst': [],
+            'couplage_worst': []
+        }
+    
+    for n in n_values:
+        for p in p_values:
+            key = (n, p)
+            if key in results:
+                data = results[key]
+                if data['glouton_ratios'] and data['couplage_ratios']:
+                    data_by_p[p]['n'].append(n)
+                    data_by_p[p]['glouton_mean'].append(sum(data['glouton_ratios']) / len(data['glouton_ratios']))
+                    data_by_p[p]['couplage_mean'].append(sum(data['couplage_ratios']) / len(data['couplage_ratios']))
+                    data_by_p[p]['glouton_worst'].append(data['glouton_worst'])
+                    data_by_p[p]['couplage_worst'].append(data['couplage_worst'])
+    
+    # Tracer les rapports moyens d'approximation
+    for p in p_values:
+        if data_by_p[p]['n']:
+            color = p_colors.get(p, 'black')
+            marker = p_markers.get(p, 'o')
+            label = f'p={p}'
+            
+            # Rapport moyen - Glouton
+            ax1.plot(data_by_p[p]['n'], data_by_p[p]['glouton_mean'], 
+                    color=color, marker=marker, linestyle='-', 
+                    label=f'Glouton ({label})', linewidth=2, markersize=6)
+            
+            # Rapport moyen - Couplage
+            ax2.plot(data_by_p[p]['n'], data_by_p[p]['couplage_mean'], 
+                    color=color, marker=marker, linestyle='-', 
+                    label=f'Couplage ({label})', linewidth=2, markersize=6)
+            
+            # Pire rapport - Glouton
+            ax3.plot(data_by_p[p]['n'], data_by_p[p]['glouton_worst'], 
+                    color=color, marker=marker, linestyle='-', 
+                    label=f'Glouton ({label})', linewidth=2, markersize=6)
+            
+            # Pire rapport - Couplage
+            ax4.plot(data_by_p[p]['n'], data_by_p[p]['couplage_worst'], 
+                    color=color, marker=marker, linestyle='-', 
+                    label=f'Couplage ({label})', linewidth=2, markersize=6)
+    
+    # Configurer les graphiques
+    ax1.set_xlabel('n (nombre de sommets)')
+    ax1.set_ylabel('Rapport d\'approximation moyen')
+    ax1.set_title(f'Rapport d\'approximation moyen - Algorithme glouton {title_suffix}')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+    
+    ax2.set_xlabel('n (nombre de sommets)')
+    ax2.set_ylabel('Rapport d\'approximation moyen')
+    ax2.set_title(f'Rapport d\'approximation moyen - Algorithme de couplage {title_suffix}')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+    
+    ax3.set_xlabel('n (nombre de sommets)')
+    ax3.set_ylabel('Pire rapport d\'approximation')
+    ax3.set_title(f'Pire rapport d\'approximation - Algorithme glouton {title_suffix}')
+    ax3.grid(True, alpha=0.3)
+    ax3.legend()
+    
+    ax4.set_xlabel('n (nombre de sommets)')
+    ax4.set_ylabel('Pire rapport d\'approximation')
+    ax4.set_title(f'Pire rapport d\'approximation - Algorithme de couplage {title_suffix}')
+    ax4.grid(True, alpha=0.3)
+    ax4.legend()
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Afficher un résumé statistique
+    print("\n" + "="*80)
+    print("RÉSUMÉ STATISTIQUE DES RAPPORTS D'APPROXIMATION")
+    print("="*80)
+    
+    # Calculer les pires rapports globaux
+    glouton_worst_global = 0
+    couplage_worst_global = 0
+    glouton_worst_config = None
+    couplage_worst_config = None
+    
+    for key, data in results.items():
+        if data['glouton_worst'] > glouton_worst_global:
+            glouton_worst_global = data['glouton_worst']
+            glouton_worst_config = key
+        
+        if data['couplage_worst'] > couplage_worst_global:
+            couplage_worst_global = data['couplage_worst']
+            couplage_worst_config = key
+    
+    print(f"\nPire rapport d'approximation - Algorithme glouton: {glouton_worst_global:.4f}")
+    print(f"  Configuration: n={glouton_worst_config[0]}, p={glouton_worst_config[1]}")
+    
+    print(f"\nPire rapport d'approximation - Algorithme de couplage: {couplage_worst_global:.4f}")
+    print(f"  Configuration: n={couplage_worst_config[0]}, p={couplage_worst_config[1]}")
+    
+    # Afficher les rapports moyens par algorithme
+    print("\nRapports d'approximation moyens par configuration:")
+    print("-" * 60)
+    print("Configuration\t\tGlouton (moyen)\tCouplage (moyen)")
+    print("-" * 60)
+    
+    for n in n_values:
+        for p in p_values:
+            key = (n, p)
+            if key in results and results[key]['glouton_ratios']:
+                glouton_mean = sum(results[key]['glouton_ratios']) / len(results[key]['glouton_ratios'])
+                couplage_mean = sum(results[key]['couplage_ratios']) / len(results[key]['couplage_ratios'])
+                print(f"n={n}, p={p}\t\t{glouton_mean:.4f}\t\t{couplage_mean:.4f}")
+
+def evaluer_heuristiques(n_values, p_values, num_instances=10):
+    """
+    Évalue expérimentalement différentes heuristiques
+    
+    Args:
+        n_values: Liste des tailles de graphes
+        p_values: Liste des probabilités d'arêtes
+        num_instances: Nombre d'instances par configuration
+        
+    Returns:
+        dict: Résultats pour chaque heuristique
+    """
+    heuristiques = {
+        'glouton': lambda G: G.algo_glouton(),
+        'couplage': lambda G: G.algo_couplage(),
+        'aleatoire': lambda G: G.heuristique_aleatoire(50),
+        'degre_pondere': lambda G: G.heuristique_degre_ponderee(30),
+        'recherche_locale': lambda G: G.heuristique_recherche_locale(max_iter=300),
+        'hybride': lambda G: G.heuristique_hybride()
+    }
+    
+    noms_heuristiques = {
+        'glouton': 'Algorithme glouton',
+        'couplage': 'Algorithme de couplage',
+        'aleatoire': 'Heuristique aléatoire',
+        'degre_pondere': 'Heuristique degré pondéré',
+        'recherche_locale': 'Recherche locale',
+        'hybride': 'Heuristique hybride'
+    }
+    
+    results = {}
+    
+    for n in n_values:
+        for p in p_values:
+            key = (n, p)
+            results[key] = {heur: {'sizes': [], 'temps': []} for heur in heuristiques.keys()}
+            
+            print(f"Test n={n}, p={p}")
+            
+            for inst in range(num_instances):
+                G = generate_random_graph(n, p)
+                
+                for heur_name, heur_func in heuristiques.items():
+                    start_time = time.time()
+                    couverture = heur_func(G)
+                    temps = time.time() - start_time
+                    
+                    if G.est_couverture_valide(couverture):
+                        results[key][heur_name]['sizes'].append(len(couverture))
+                        results[key][heur_name]['temps'].append(temps)
+                    else:
+                        # Si la solution n'est pas valide, utiliser une valeur pénalisante
+                        results[key][heur_name]['sizes'].append(n)  # pire cas: tous les sommets
+                        results[key][heur_name]['temps'].append(temps)
+    
+    return results, noms_heuristiques
+
+def tracer_comparaison_heuristiques(results, noms_heuristiques, title_suffix=""):
+    """
+    Trace la comparaison des différentes heuristiques
+    """
+    n_values = sorted({key[0] for key in results.keys()})
+    p_values = sorted({key[1] for key in results.keys()})
+    heuristiques = list(noms_heuristiques.keys())
+    
+    # Couleurs pour les heuristiques
+    couleurs = {
+        'glouton': 'red',
+        'couplage': 'blue',
+        'aleatoire': 'green',
+        'degre_pondere': 'orange',
+        'recherche_locale': 'purple',
+        'hybride': 'brown'
+    }
+    
+    marqueurs = {
+        'glouton': 'o',
+        'couplage': 's',
+        'aleatoire': '^',
+        'degre_pondere': 'D',
+        'recherche_locale': 'v',
+        'hybride': '*'
+    }
+    
+    # Créer les figures
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    ax1, ax2, ax3, ax4 = axes.flatten()
+    
+    # Organiser les données
+    donnees_par_p = {}
+    for p in p_values:
+        donnees_par_p[p] = {heur: {'n': [], 'taille_moy': [], 'temps_moy': []} for heur in heuristiques}
+    
+    for n in n_values:
+        for p in p_values:
+            key = (n, p)
+            if key in results:
+                for heur in heuristiques:
+                    if results[key][heur]['sizes']:
+                        donnees_par_p[p][heur]['n'].append(n)
+                        donnees_par_p[p][heur]['taille_moy'].append(
+                            sum(results[key][heur]['sizes']) / len(results[key][heur]['sizes'])
+                        )
+                        donnees_par_p[p][heur]['temps_moy'].append(
+                            sum(results[key][heur]['temps']) / len(results[key][heur]['temps'])
+                        )
+    
+    # Tracer pour p=0.3 (valeur typique)
+    p_a_tracer = 0.3
+    if p_a_tracer in p_values:
+        for heur in heuristiques:
+            if donnees_par_p[p_a_tracer][heur]['n']:
+                couleur = couleurs.get(heur, 'black')
+                marqueur = marqueurs.get(heur, 'o')
+                nom = noms_heuristiques[heur]
+                
+                # Taille moyenne de la couverture
+                ax1.plot(donnees_par_p[p_a_tracer][heur]['n'], 
+                        donnees_par_p[p_a_tracer][heur]['taille_moy'],
+                        color=couleur, marker=marqueur, linestyle='-',
+                        label=nom, linewidth=2, markersize=6)
+                
+                # Temps d'exécution
+                ax2.plot(donnees_par_p[p_a_tracer][heur]['n'], 
+                        donnees_par_p[p_a_tracer][heur]['temps_moy'],
+                        color=couleur, marker=marqueur, linestyle='-',
+                        label=nom, linewidth=2, markersize=6)
+    
+    # Tracer le ratio par rapport à la meilleure heuristique
+    for n in n_values:
+        for p in [0.3]:  # On se concentre sur p=0.3
+            key = (n, p)
+            if key in results:
+                # Trouver la meilleure taille moyenne
+                meilleures_tailles = {}
+                for heur in heuristiques:
+                    if results[key][heur]['sizes']:
+                        meilleures_tailles[heur] = sum(results[key][heur]['sizes']) / len(results[key][heur]['sizes'])
+                
+                if meilleures_tailles:
+                    meilleure_taille = min(meilleures_tailles.values())
+                    
+                    for heur in heuristiques:
+                        if heur in meilleures_tailles:
+                            ratio = meilleures_tailles[heur] / meilleure_taille
+                            couleur = couleurs.get(heur, 'black')
+                            marqueur = marqueurs.get(heur, 'o')
+                            nom = noms_heuristiques[heur]
+                            
+                            # Tracer le point
+                            ax3.scatter(n, ratio, color=couleur, marker=marqueur, s=60, label=nom if n == n_values[0] else "")
+    
+    # Diagramme en barres pour les performances relatives
+    tailles_moyennes_globales = {}
+    for heur in heuristiques:
+        tailles = []
+        for key in results:
+            if results[key][heur]['sizes']:
+                tailles.extend(results[key][heur]['sizes'])
+        if tailles:
+            tailles_moyennes_globales[heur] = sum(tailles) / len(tailles)
+    
+    if tailles_moyennes_globales:
+        meilleure_taille_globale = min(tailles_moyennes_globales.values())
+        ratios_globaux = {heur: taille / meilleure_taille_globale 
+                         for heur, taille in tailles_moyennes_globales.items()}
+        
+        noms_affiches = [noms_heuristiques[heur] for heur in heuristiques if heur in ratios_globaux]
+        valeurs = [ratios_globaux[heur] for heur in heuristiques if heur in ratios_globaux]
+        couleurs_affichees = [couleurs[heur] for heur in heuristiques if heur in ratios_globaux]
+        
+        bars = ax4.bar(noms_affiches, valeurs, color=couleurs_affichees, alpha=0.7)
+        ax4.set_ylabel('Ratio par rapport à la meilleure')
+        ax4.set_title('Performance relative globale')
+        
+        # Ajouter les valeurs sur les barres
+        for bar, valeur in zip(bars, valeurs):
+            height = bar.get_height()
+            ax4.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                    f'{valeur:.3f}', ha='center', va='bottom', rotation=0)
+    
+    # Configurer les graphiques
+    ax1.set_xlabel('n (nombre de sommets)')
+    ax1.set_ylabel('Taille moyenne de la couverture')
+    ax1.set_title(f'Taille des couvertures (p={p_a_tracer}) {title_suffix}')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+    
+    ax2.set_xlabel('n (nombre de sommets)')
+    ax2.set_ylabel('Temps d\'exécution moyen (s)')
+    ax2.set_title(f'Temps d\'exécution (p={p_a_tracer}) {title_suffix}')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+    ax2.set_yscale('log')  # Échelle logarithmique pour mieux voir les différences
+    
+    ax3.set_xlabel('n (nombre de sommets)')
+    ax3.set_ylabel('Ratio par rapport à la meilleure')
+    ax3.set_title(f'Ratio de performance (p={p_a_tracer}) {title_suffix}')
+    ax3.grid(True, alpha=0.3)
+    ax3.legend()
+    
+    ax4.tick_params(axis='x', rotation=45)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Afficher un résumé statistique
+    print("\n" + "="*80)
+    print("RÉSUMÉ STATISTIQUE DES HEURISTIQUES")
+    print("="*80)
+    
+    # Calculer les statistiques globales
+    stats_globales = {}
+    for heur in heuristiques:
+        toutes_tailles = []
+        tous_temps = []
+        
+        for key in results:
+            if results[key][heur]['sizes']:
+                toutes_tailles.extend(results[key][heur]['sizes'])
+                tous_temps.extend(results[key][heur]['temps'])
+        
+        if toutes_tailles:
+            stats_globales[heur] = {
+                'taille_moyenne': sum(toutes_tailles) / len(toutes_tailles),
+                'temps_moyen': sum(tous_temps) / len(tous_temps),
+                'meilleure_taille': min(toutes_tailles),
+                'pire_taille': max(toutes_tailles)
+            }
+    
+    # Afficher le tableau des statistiques
+    print(f"\n{'Heuristique':<25} {'Taille moy':<12} {'Temps moy (s)':<14} {'Meilleure':<10} {'Pire':<10}")
+    print("-" * 75)
+    
+    for heur in heuristiques:
+        if heur in stats_globales:
+            stats = stats_globales[heur]
+            print(f"{noms_heuristiques[heur]:<25} {stats['taille_moyenne']:<12.2f} {stats['temps_moyen']:<14.4f} {stats['meilleure_taille']:<10} {stats['pire_taille']:<10}")
+ 
+def tester_algorithme_universel_ameliore(current_graph=None):
+    """
+    Fonction universelle améliorée pour tester n'importe quel algorithme.
+    Utilise le graphe courant si disponible, sinon propose d'en charger un.
+    
+    Args:
+        current_graph: Graphe courant mémorisé (optionnel)
+        
+    Returns:
+        Graph: Le graphe courant (pour mémorisation)
+    """
+    graphe = current_graph
+    
+    # Si pas de graphe courant, demander à en charger un
+    if graphe is None:
+        filename = input("Entrez le chemin du fichier contenant le graphe: ").strip()
+        try:
+            graphe = Graph(read_graph(filename))
+            print(f"✓ Graphe chargé depuis {filename}")
+            print(f"  • Sommets: {len(graphe.sommets())}")
+            print(f"  • Arêtes: {len(graphe.aretes())}")
+            print(f"  • Degré maximal: {graphe.max_degree_vertex(return_all=False)[1]}")
+        except FileNotFoundError:
+            print(f"✗ Fichier non trouvé: {filename}")
+            return None
+        except Exception as e:
+            print(f"✗ Erreur lors du chargement du graphe: {e}")
+            return None
+    else:
+        print("✓ Utilisation du graphe courant")
+        print(f"  • Sommets: {len(graphe.sommets())}")
+        print(f"  • Arêtes: {len(graphe.aretes())}")
+        print(f"  • Degré maximal: {graphe.max_degree_vertex(return_all=False)[1]}")
+        
+        # Option pour recharger un autre fichier
+        changer = input("\nVoulez-vous charger un autre fichier? (o/n): ").strip().lower()
+        if changer == 'o':
+            filename = input("Entrez le nouveau chemin du fichier: ").strip()
+            try:
+                graphe = Graph(read_graph(filename))
+                print(f"✓ Nouveau graphe chargé depuis {filename}")
+                print(f"  • Sommets: {len(graphe.sommets())}")
+                print(f"  • Arêtes: {len(graphe.aretes())}")
+            except Exception as e:
+                print(f"✗ Erreur lors du chargement: {e}")
+                return current_graph  # Garder l'ancien graphe en cas d'erreur
+    
+    # Menu principal des algorithmes
+    while True:
+        print("\n" + "="*60)
+        print("MENU DES ALGORITHMES - GRAPHE COURANT")
+        print("="*60)
+        print(f"Graphe: {len(graphe.sommets())} sommets, {len(graphe.aretes())} arêtes")
+        
+        print("\n🔹 ALGORITHMES APPROXIMATIFS:")
+        print("   1. Algorithme de couplage")
+        print("   2. Algorithme glouton")
+        
+        print("\n🔹 ALGORITHMES EXACTS (BRANCHEMENT):")
+        print("   3. Branchement simple")
+        print("   4. Branchement avec couplage et bornes")
+        print("   5. Branchement avec glouton seulement")
+        print("   6. Branchement avec bornes seulement")
+        print("   7. Branchement avec couplage seulement")
+        print("   8. Branchement glouton avec borne")
+        
+        print("\n🔹 BRANCHEMENTS AMÉLIORÉS:")
+        print("   9. Branchement amélioré v1")
+        print("   10. Branchement amélioré v2 (degré max)")
+        print("   11. Branchement amélioré v3 (degré 1)")
+        
+        print("\n🔹 HEURISTIQUES AVANCÉES:")
+        print("   12. Heuristique aléatoire")
+        print("   13. Heuristique degré pondéré")
+        print("   14. Heuristique recherche locale")
+        print("   15. Heuristique hybride")
+        
+        print("\n🔹 ALGORITHME EXACT (PETITS GRAPHES):")
+        print("   16. Force brute")
+        
+        print("\n🔹 COMPARAISONS MULTIPLES:")
+        print("   17. Tester tous les algorithmes approximatifs")
+        print("   18. Tester tous les algorithmes de branchement")
+        print("   19. Comparaison complète (tous les algorithmes)")
+        
+        print("\n🔹 OPTIONS:")
+        print("   20. Changer de graphe")
+        print("   21. Retour au menu principal")
+        print("-"*60)
+        
+        choix = input("Choisissez une option (1-21): ").strip()
+        
+        if choix == "21":
+            return graphe  # Retourner le graphe courant pour mémorisation
+        
+        elif choix == "20":
+            # Changer de graphe
+            filename = input("Entrez le nouveau chemin du fichier: ").strip()
+            try:
+                graphe = Graph(read_graph(filename))
+                print(f"✓ Nouveau graphe chargé depuis {filename}")
+                print(f"  • Sommets: {len(graphe.sommets())}")
+                print(f"  • Arêtes: {len(graphe.aretes())}")
+                continue
+            except Exception as e:
+                print(f"✗ Erreur lors du chargement: {e}")
+                continue
+        
+        # Mapping des algorithmes individuels
+        algorithmes_individuels = {
+            '1': ("Algorithme de couplage", graphe.algo_couplage, False),
+            '2': ("Algorithme glouton", graphe.algo_glouton, False),
+            '3': ("Branchement simple", graphe.branchement_simple, True),
+            '4': ("Branchement avec couplage et bornes", graphe.branchement_couplage_avec_borne, True),
+            '5': ("Branchement avec glouton seulement", graphe.branchement_avec_glouton_seulement, True),
+            '6': ("Branchement avec bornes seulement", graphe.branchement_avec_bornes_seulement, True),
+            '7': ("Branchement avec couplage seulement", graphe.branchement_avec_couplage_seulement, True),
+            '8': ("Branchement glouton avec borne", graphe.branchement_glouton_avec_borne, True),
+            '9': ("Branchement amélioré v1", graphe.branchement_ameliore_v1, True),
+            '10': ("Branchement amélioré v2", graphe.branchement_ameliore_v2, True),
+            '11': ("Branchement amélioré v3", graphe.branchement_ameliore_v3, True),
+            '12': ("Heuristique aléatoire", graphe.heuristique_aleatoire, False),
+            '13': ("Heuristique degré pondéré", graphe.heuristique_degre_ponderee, False),
+            '14': ("Heuristique recherche locale", graphe.heuristique_recherche_locale, False),
+            '15': ("Heuristique hybride", graphe.heuristique_hybride, False),
+            '16': ("Force brute", lambda: bruteforce_vertex_cover(graphe.adj), False)
+        }
+        
+        # Exécution d'un algorithme individuel
+        if choix in algorithmes_individuels:
+            nom_algo, fonction_algo, retourne_noeuds = algorithmes_individuels[choix]
+            executer_algorithme_individuel(graphe, nom_algo, fonction_algo, retourne_noeuds)
+        
+        # Comparaisons multiples
+        elif choix == "17":
+            tester_tous_algorithmes_approximatifs(graphe)
+        
+        elif choix == "18":
+            tester_tous_algorithmes_branchement(graphe)
+        
+        elif choix == "19":
+            tester_tous_algorithmes(graphe)
+        
+        else:
+            print("✗ Option invalide!")
+        
+        input("\nAppuyez sur Entrée pour continuer...")
+
+def executer_algorithme_individuel(graphe, nom_algo, fonction_algo, retourne_noeuds):
+    """
+    Exécute un algorithme individuel et affiche les résultats
+    """
+    # Avertissements pour les algorithmes lents
+    n_sommets = len(graphe.sommets())
+    
+    # Vérifications de sécurité pour les algorithmes lents
+    if "branchement" in nom_algo.lower() and n_sommets > 20:
+        print(f"⚠️  ATTENTION: Le graphe a {n_sommets} sommets.")
+        print("   Les algorithmes de branchement peuvent être très lents.")
+        reponse = input("   Voulez-vous continuer? (o/n): ").strip().lower()
+        if reponse != 'o':
+            return
+    
+    if "force brute" in nom_algo.lower() and n_sommets > 15:
+        print(f"⚠️  ATTENTION: Le graphe a {n_sommets} sommets.")
+        print("   La force brute sera extrêmement lente (complexité exponentielle).")
+        reponse = input("   Voulez-vous vraiment continuer? (o/n): ").strip().lower()
+        if reponse != 'o':
+            return
+    
+    # Exécution de l'algorithme
+    print(f"\n🎯 Exécution de: {nom_algo}")
+    print("-" * 40)
+    
+    debut = time.time()
+    
+    try:
+        resultat = fonction_algo()
+        temps_execution = time.time() - debut
+        
+        # Traitement du résultat selon le type de retour
+        if retourne_noeuds and isinstance(resultat, tuple):
+            couverture, noeuds_generes = resultat
+            taille_couverture = len(couverture)
+        else:
+            couverture = resultat
+            taille_couverture = len(couverture)
+            noeuds_generes = None
+        
+        # Validation de la couverture
+        est_valide = graphe.est_couverture_valide(couverture)
+        
+        # Affichage des résultats
+        print(f"✅ RÉSULTATS - {nom_algo}")
+        print(f"   • Temps d'exécution: {temps_execution:.4f} secondes")
+        print(f"   • Taille de la couverture: {taille_couverture}")
+        print(f"   • Couverture valide: {'✓ OUI' if est_valide else '✗ NON'}")
+        
+        if noeuds_generes is not None:
+            print(f"   • Nœuds générés: {noeuds_generes}")
+        
+        print(f"   • Couverture: {sorted(couverture)}")
+        
+        # Calcul de statistiques supplémentaires
+        if est_valide:
+            ratio_couverture = taille_couverture / n_sommets
+            print(f"   • Ratio couverture/sommets: {ratio_couverture:.3f}")
+    
+    except Exception as e:
+        temps_execution = time.time() - debut
+        print(f"✗ Erreur lors de l'exécution: {e}")
+        print(f"   Temps écoulé: {temps_execution:.4f} secondes")
+
+def tester_tous_algorithmes_approximatifs(graphe):
+    """
+    Teste tous les algorithmes approximatifs et compare les résultats
+    """
+    print("\n🔍 COMPARAISON DES ALGORITHMES APPROXIMATIFS")
+    print("=" * 50)
+    
+    algorithmes = [
+        ("Algorithme de couplage", graphe.algo_couplage),
+        ("Algorithme glouton", graphe.algo_glouton),
+        ("Heuristique aléatoire", lambda: graphe.heuristique_aleatoire(20)),
+        ("Heuristique degré pondéré", lambda: graphe.heuristique_degre_ponderee(20)),
+        ("Heuristique hybride", graphe.heuristique_hybride)
+    ]
+    
+    resultats = []
+    
+    for nom, algo in algorithmes:
+        print(f"\n⏳ Exécution de {nom}...")
+        debut = time.time()
+        try:
+            couverture = algo()
+            temps = time.time() - debut
+            valide = graphe.est_couverture_valide(couverture)
+            resultats.append((nom, len(couverture), temps, valide, couverture))
+            print(f"   ✓ Terminé: {len(couverture)} sommets, {temps:.3f}s")
+        except Exception as e:
+            print(f"   ✗ Erreur: {e}")
+            resultats.append((nom, None, None, False, None))
+    
+    # Affichage comparatif
+    print("\n" + "="*60)
+    print("RÉSULTATS COMPARATIFS - ALGORITHMES APPROXIMATIFS")
+    print("="*60)
+    print(f"{'Algorithme':<25} {'Taille':<8} {'Temps (s)':<10} {'Valide':<8}")
+    print("-" * 60)
+    
+    for nom, taille, temps, valide, _ in resultats:
+        if taille is not None:
+            print(f"{nom:<25} {taille:<8} {temps:<10.4f} {'✓' if valide else '✗':<8}")
+        else:
+            print(f"{nom:<25} {'ERREUR':<8} {'-':<10} {'✗':<8}")
+    
+    # Trouver la meilleure solution valide
+    solutions_valides = [(nom, taille) for nom, taille, _, valide, _ in resultats 
+                        if valide and taille is not None]
+    if solutions_valides:
+        meilleure_nom, meilleure_taille = min(solutions_valides, key=lambda x: x[1])
+        print(f"\n🏆 Meilleure solution: {meilleure_nom} ({meilleure_taille} sommets)")
+
+def tester_tous_algorithmes_branchement(graphe):
+    """
+    Teste tous les algorithmes de branchement et compare les résultats
+    """
+    print("\n🔍 COMPARAISON DES ALGORITHMES DE BRANCHEMENT")
+    print("=" * 50)
+    
+    # Vérification de la taille du graphe
+    n_sommets = len(graphe.sommets())
+    if n_sommets > 20:
+        print(f"⚠️  ATTENTION: Le graphe a {n_sommets} sommets.")
+        print("   Cette comparaison peut être très longue.")
+        reponse = input("   Voulez-vous continuer? (o/n): ").strip().lower()
+        if reponse != 'o':
+            return
+    
+    algorithmes = [
+        ("Branchement simple", graphe.branchement_simple),
+        ("Branchement avec couplage et bornes", graphe.branchement_couplage_avec_borne),
+        ("Branchement avec glouton seulement", graphe.branchement_avec_glouton_seulement),
+        ("Branchement avec bornes seulement", graphe.branchement_avec_bornes_seulement),
+        ("Branchement avec couplage seulement", graphe.branchement_avec_couplage_seulement),
+        ("Branchement glouton avec borne", graphe.branchement_glouton_avec_borne),
+        ("Branchement amélioré v1", graphe.branchement_ameliore_v1),
+        ("Branchement amélioré v2", graphe.branchement_ameliore_v2),
+        ("Branchement amélioré v3", graphe.branchement_ameliore_v3)
+    ]
+    
+    resultats = []
+    
+    for nom, algo in algorithmes:
+        print(f"\n⏳ Exécution de {nom}...")
+        debut = time.time()
+        try:
+            couverture, noeuds = algo()
+            temps = time.time() - debut
+            valide = graphe.est_couverture_valide(couverture)
+            resultats.append((nom, len(couverture), temps, valide, noeuds, couverture))
+            print(f"   ✓ Terminé: {len(couverture)} sommets, {noeuds} nœuds, {temps:.3f}s")
+        except Exception as e:
+            print(f"   ✗ Erreur: {e}")
+            resultats.append((nom, None, None, False, None, None))
+    
+    # Affichage comparatif
+    print("\n" + "="*70)
+    print("RÉSULTATS COMPARATIFS - ALGORITHMES DE BRANCHEMENT")
+    print("="*70)
+    print(f"{'Algorithme':<30} {'Taille':<8} {'Temps (s)':<10} {'Nœuds':<10} {'Valide':<8}")
+    print("-" * 70)
+    
+    for nom, taille, temps, valide, noeuds, _ in resultats:
+        if taille is not None:
+            noeuds_str = str(noeuds) if noeuds is not None else "N/A"
+            print(f"{nom:<30} {taille:<8} {temps:<10.4f} {noeuds_str:<10} {'✓' if valide else '✗':<8}")
+        else:
+            print(f"{nom:<30} {'ERREUR':<8} {'-':<10} {'-':<10} {'✗':<8}")
+
+def tester_tous_algorithmes(graphe):
+    """
+    Teste tous les algorithmes disponibles
+    """
+    print("\n🔍 COMPARAISON COMPLÈTE DE TOUS LES ALGORITHMES")
+    print("=" * 50)
+    
+    # Vérification de la taille pour les algorithmes lents
+    n_sommets = len(graphe.sommets())
+    if n_sommets > 15:
+        print(f"⚠️  ATTENTION: Le graphe a {n_sommets} sommets.")
+        print("   Certains algorithmes (branchement, force brute) peuvent être très lents.")
+        reponse = input("   Voulez-vous continuer? (o/n): ").strip().lower()
+        if reponse != 'o':
+            return
+    
+    # Tester d'abord les algorithmes rapides
+    tester_tous_algorithmes_approximatifs(graphe)
+    
+    # Puis les algorithmes de branchement (si l'utilisateur confirme)
+    if n_sommets <= 20:
+        print("\n" + "="*50)
+        continuer = input("Voulez-vous tester les algorithmes de branchement? (o/n): ").strip().lower()
+        if continuer == 'o':
+            tester_tous_algorithmes_branchement(graphe)
+    
+    # Enfin la force brute (seulement pour les très petits graphes)
+    if n_sommets <= 15:
+        print("\n" + "="*50)
+        continuer = input("Voulez-vous tester la force brute? (o/n): ").strip().lower()
+        if continuer == 'o':
+            print("\n⏳ Exécution de la force brute...")
+            debut = time.time()
+            try:
+                couverture_brute = bruteforce_vertex_cover(graphe.adj)
+                temps = time.time() - debut
+                valide = graphe.est_couverture_valide(couverture_brute)
+                print(f"✓ Force brute terminée: {len(couverture_brute)} sommets, {temps:.3f}s")
+                print(f"  Solution optimale: {sorted(couverture_brute)}")
+            except Exception as e:
+                print(f"✗ Erreur lors de la force brute: {e}")
 
 def main():
     """
-    Programme principal avec menu interactif pour tester les fonctions de graphes.
+    Version du menu principal avec la fonction universelle améliorée
     """
-    current_graph = None
+    current_graph = None  # Mémorise le graphe courant
     
     while True:
         print("\n" + "="*60)
         print("MENU PRINCIPAL - ALGORITHMES DE GRAPHES")
         print("="*60)
+        if current_graph:
+            print(f"📊 Graphe courant: {len(current_graph.sommets())} sommets, {len(current_graph.aretes())} arêtes")
+        else:
+            print("📊 Aucun graphe chargé")
         print("1. Charger un graphe depuis un fichier")
         print("2. Générer un graphe aléatoire")
         print("3. Afficher les informations du graphe courant")
         print("4. Test des algorithmes GLOUTON et COUPLAGE sur le graphe courant")
         print("5. Test interactif de branchement sur le graphe courant")
-        print("6. Comparaison statistique de l'algo GLOUTON vs COUPLAGE sur plusieurs graphes aléatoires")
+        print("6. Comparaison statistique de l'algo GLOUTON vs COUPLAGE")
         print("7. Tests de performance sur plusieurs graphes (benchmark)")
         print("8. Vérification par force brute (petits graphes)")
-        print("9. Quitter")
+        print("9. Test des branchements améliorés (v1, v2, v3)")
+        print("10. Évaluation de la qualité des algorithmes approximatifs")
+        print("11. Évaluation des heuristiques supplémentaires")
+        print("12. Tester tous les algorithmes (GRAPHE COURANT)")
+        print("13. Quitter")
         print("-"*60)
         
-        choix = input("Votre choix (1-9): ").strip()
+        choix = input("Votre choix (1-13): ").strip()
         
         if choix == "1":
-            # Charger un graphe depuis un fichier
             filename = input("Entrez le nom du fichier (ex: exempleinstance.txt): ").strip()
             try:
                 current_graph = Graph(read_graph(filename))
@@ -1473,7 +2764,7 @@ def main():
                 print("Stratégies disponibles:")
                 print("1. Branchement simple (baseline)")
                 print("2. Avec couplage et bornes (couplage_borne)")
-                print("3. Avec algorithme glouton pour solutions réalisables")
+                print("3. Avec glouton seulement (glouton)")
                 print("4. Avec bornes inférieures seulement")
                 print("5. Avec couplage seulement (couplage)")
                 print("6. Avec glouton et bornes (glouton_borne)")
@@ -1576,15 +2867,145 @@ def main():
                 print(f"✗ Erreur lors de la force brute: {e}")
                 
         elif choix == "9":
-            # Quitter
+            # Test des branchements améliorés
+            print("\n--- TEST DES BRANCHEMENTS AMÉLIORÉS ---")
+            try:
+                # Configuration des paramètres
+                n_values = [8, 10, 12, 14, 16]
+                p_values_labels = [0.1, 0.3, 0.5, '1/sqrt']
+                num_instances = 3
+                max_time_par_instance = 30
+
+                print(f"Configuration actuelle:")
+                print(f"  n_values: {n_values}")
+                print(f"  p_values: {p_values_labels}")
+                print(f"  instances: {num_instances}")
+                print(f"  timeout: {max_time_par_instance}s")
+
+                modifier = input("Voulez-vous modifier la configuration? (o/n): ").strip().lower()
+                if modifier == 'o':
+                    try:
+                        n_input = input("n_values (séparés par des virgules): ")
+                        if n_input:
+                            n_values = [int(x.strip()) for x in n_input.split(',') if x.strip()]
+                        p_input = input("p_values (séparés par des virgules, ex: 0.1,0.3,0.5,1/sqrt): ")
+                        if p_input:
+                            p_values_labels = []
+                            for p in p_input.split(','):
+                                p = p.strip()
+                                if p == '1/sqrt':
+                                    p_values_labels.append(p)
+                                else:
+                                    p_values_labels.append(float(p))
+                        num_instances = int(input(f"Nombre d'instances (défaut {num_instances}): ") or num_instances)
+                        max_time_par_instance = int(input(f"Timeout (défaut {max_time_par_instance}s): ") or max_time_par_instance)
+                    except ValueError as e:
+                        print(f"✗ Entrée invalide, utilisation des valeurs par défaut: {e}")
+
+                # Lancer les tests
+                print("\nLancement des tests des branchements améliorés...")
+                all_results, strategy_names = tester_branchement_ameliores(
+                    n_values, p_values_labels,
+                    num_instances=num_instances,
+                    max_time_par_instance=max_time_par_instance
+                )
+
+                # Tracer les résultats
+                tracer_comparaison_ameliores(all_results, strategy_names,
+                                           title_suffix=f"(instances={num_instances})")
+
+            except Exception as e:
+                print(f"✗ Erreur lors des tests des branchements améliorés: {e}")
+                
+        elif choix == "10":
+            # Évaluation de la qualité des algorithmes approximatifs
+            print("\n--- ÉVALUATION DE LA QUALITÉ DES ALGORITHMES APPROXIMATIFS ---")
+            try:
+                # Configuration des paramètres
+                n_values = [5, 10, 15, 20, 25, 30]  # Inclure des petites tailles pour le calcul optimal
+                p_values = [0.1, 0.3, 0.5, 0.7]
+                num_instances = 10
+
+                print(f"Configuration actuelle:")
+                print(f"  n_values: {n_values}")
+                print(f"  p_values: {p_values}")
+                print(f"  instances: {num_instances}")
+
+                modifier = input("Voulez-vous modifier la configuration? (o/n): ").strip().lower()
+                if modifier == 'o':
+                    try:
+                        n_input = input("n_values (séparés par des virgules): ")
+                        if n_input:
+                            n_values = [int(x.strip()) for x in n_input.split(',') if x.strip()]
+                        p_input = input("p_values (séparés par des virgules, ex: 0.1,0.3,0.5,0.7): ")
+                        if p_input:
+                            p_values = [float(x.strip()) for x in p_input.split(',') if x.strip()]
+                        num_instances = int(input(f"Nombre d'instances (défaut {num_instances}): ") or num_instances)
+                    except ValueError as e:
+                        print(f"✗ Entrée invalide, utilisation des valeurs par défaut: {e}")
+
+                # Lancer l'évaluation
+                print("\nLancement de l'évaluation de la qualité des algorithmes approximatifs...")
+                print("Cette opération peut prendre quelques minutes pour les petits graphes.")
+                results = evaluer_qualite_approximation(n_values, p_values, num_instances)
+
+                # Tracer les résultats
+                tracer_rapports_approximation(results, title_suffix=f"(instances={num_instances})")
+
+            except Exception as e:
+                print(f"✗ Erreur lors de l'évaluation de la qualité: {e}")
+                
+        elif choix == "11":
+            # Évaluation des heuristiques supplémentaires
+            print("\n--- ÉVALUATION DES HEURISTIQUES SUPPLÉMENTAIRES ---")
+            try:
+                # Configuration des paramètres
+                n_values = [10, 20, 30, 40, 50]
+                p_values = [0.1, 0.3, 0.5]
+                num_instances = 5
+
+                print(f"Configuration actuelle:")
+                print(f"  n_values: {n_values}")
+                print(f"  p_values: {p_values}")
+                print(f"  instances: {num_instances}")
+
+                modifier = input("Voulez-vous modifier la configuration? (o/n): ").strip().lower()
+                if modifier == 'o':
+                    try:
+                        n_input = input("n_values (séparés par des virgules): ")
+                        if n_input:
+                            n_values = [int(x.strip()) for x in n_input.split(',') if x.strip()]
+                        p_input = input("p_values (séparés par des virgules, ex: 0.1,0.3,0.5): ")
+                        if p_input:
+                            p_values = [float(x.strip()) for x in p_input.split(',') if x.strip()]
+                        num_instances = int(input(f"Nombre d'instances (défaut {num_instances}): ") or num_instances)
+                    except ValueError as e:
+                        print(f"✗ Entrée invalide, utilisation des valeurs par défaut: {e}")
+
+                # Lancer l'évaluation
+                print("\nLancement de l'évaluation des heuristiques supplémentaires...")
+                print("Cette opération peut prendre quelques minutes.")
+                results, noms_heuristiques = evaluer_heuristiques(n_values, p_values, num_instances)
+
+                # Tracer les résultats
+                tracer_comparaison_heuristiques(results, noms_heuristiques, 
+                                              title_suffix=f"(instances={num_instances})")
+
+            except Exception as e:
+                print(f"✗ Erreur lors de l'évaluation des heuristiques: {e}")
+                
+        elif choix == "12":
+            current_graph = tester_algorithme_universel_ameliore(current_graph)
+            
+        elif choix == "13":
             print("Au revoir!")
             break
-            
+
         else:
-            print("✗ Choix invalide. Veuillez choisir un nombre entre 1 et 9.")
+            print("✗ Choix invalide. Veuillez choisir un nombre entre 1 et 13.")
         
         # Pause avant de revenir au menu
-        if choix not in ["6", "7"]:  # Pas de pause après les tests automatiques
+        if choix not in ["6", "7", "9", "10", "11", "12"]:  # Pas de pause après les tests automatiques
             input("\nAppuyez sur Entrée pour continuer...")
 
 # Point d'entrée du programme
