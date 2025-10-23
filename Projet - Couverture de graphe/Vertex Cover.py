@@ -1239,10 +1239,7 @@ def bruteforce_vertex_cover(adj):
             
     return best
 
-def tester_strategies_branchement(
-    n_values, p_values_labels, 
-    num_instances=3, max_time_par_instance=30, 
-    strategies_to_run=None):
+def tester_strategies_branchement(n_values, p_values_labels, num_instances=3, max_time_par_instance=30, strategies_to_run=None):
     """
     Teste différentes stratégies de branchement sur plusieurs instances
     """
@@ -1301,7 +1298,13 @@ def tester_strategies_branchement(
                             'timeout': timeout
                         })
                         
+                        if timeout:
+                            print(f"  {strategy}: TIMEOUT")
+                        else:
+                            print(f"  {strategy}: OK - {len(coverage)} sommets, {t1-t0:.2f}s")
+                        
                     except Exception as e:
+                        print(f"  {strategy}: ERREUR - {e}")
                         all_results[key][strategy].append({
                             'time': None, 'nodes': None, 'size': None, 
                             'valid': False, 'error': str(e), 'timeout': False
@@ -1346,10 +1349,7 @@ def mesurer_branchement_instance_return_nodes(n, p, methode='simple', max_time_p
     timeout_flag = (t > max_time_par_instance)
     return t, len(C), valide, timeout_flag, nodes_generated
 
-def tester_branchement_sur_une_valeur_p_complet(
-    n_values, p_values_labels, 
-    num_instances=3, max_time_par_instance=30, 
-    methods_to_run=None):
+def tester_branchement_sur_une_valeur_p_complet(n_values, p_values_labels, num_instances=3, max_time_par_instance=30, methods_to_run=None):
     """
     Pour chaque n in n_values et chaque p in p_values_labels (float ou '1/sqrt'),
     génère num_instances graphes aléatoires et exécute uniquement les méthodes spécifiées.
@@ -1415,156 +1415,425 @@ def tester_branchement_sur_une_valeur_p_complet(
 
     return all_results
 
-def tracer_comparaison_strategies(all_results, strategies_to_plot=None, title_suffix=""):
+def tracer_comparaison_strategies_complet(all_results, strategies_to_plot=None, title_suffix=""):
     """
-    Trace la comparaison des différentes stratégies de branchement
+    Graphique complet avec toutes les stratégies et tous les p sur les mêmes axes
     """
-    # Extraire les clés et déterminer les stratégies à tracer
     keys = list(all_results.keys())
+    if not keys:
+        print("Aucune donnée à tracer!")
+        return
+        
     ns = sorted({k[0] for k in keys})
-    ps_to_plot = [0.1, 0.3, 0.5, '1/sqrt']
     
     if strategies_to_plot is None:
         example_key = keys[0]
         strategies_to_plot = list(all_results[example_key].keys())
 
-    p_colors = {
-        0.1: 'blue',
-        0.3: 'orange',
-        0.5: 'green',
-        '1/sqrt': 'red'
+    # Couleurs et styles
+    strategy_colors = {
+        'simple': 'blue', 'couplage_borne': 'green', 'glouton': 'red',
+        'bornes': 'orange', 'couplage': 'purple', 'glouton_borne': 'brown'
     }
     
-    p_markers = {
-        0.1: 'o',
-        0.3: 's',
-        0.5: '^',
-        '1/sqrt': 'D'
+    strategy_markers = {
+        'simple': 'o', 'couplage_borne': 's', 'glouton': '^',
+        'bornes': 'D', 'couplage': 'v', 'glouton_borne': '*'
+    }
+    
+    strategy_names = {
+        'simple': 'Simple', 'couplage_borne': 'Couplage+Borne', 
+        'glouton': 'Glouton', 'bornes': 'Borne seule',
+        'couplage': 'Couplage seul', 'glouton_borne': 'Glouton+Borne'
+    }
+
+    p_linestyles = {
+        0.1: '-', 0.3: '--', 0.5: ':', 
+        0.3536: '-.', 0.3162: '-.', 0.2887: '-.', 0.2673: '-.', 0.2500: '-.'
     }
     
     p_labels = {
-        0.1: 'p=0.1',
-        0.3: 'p=0.3',
-        0.5: 'p=0.5',
-        '1/sqrt': 'p=1/√n'
+        0.1: 'p=0.1', 0.3: 'p=0.3', 0.5: 'p=0.5',
+        0.3536: 'p=1/√8', 0.3162: 'p=1/√10', 0.2887: 'p=1/√12', 
+        0.2673: 'p=1/√14', 0.2500: 'p=1/√16'
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    ax1, ax2 = axes
+
+    # Organiser les données
+    organized_data = {}
+    for strategy in strategies_to_plot:
+        organized_data[strategy] = {}
+        for key in keys:
+            p = key[1]
+            if p not in organized_data[strategy]:
+                organized_data[strategy][p] = {'n': [], 'time': [], 'nodes': []}
+
+    # Remplir les données
+    for n in ns:
+        for strategy in strategies_to_plot:
+            for key in keys:
+                if key[0] == n:
+                    p = key[1]
+                    records = all_results[key].get(strategy, [])
+                    time_vals = [r['time'] for r in records if r.get('time') and r['time'] > 0 and not r.get('timeout') and 'error' not in r]
+                    node_vals = [r['nodes'] for r in records if r.get('nodes') and not r.get('timeout') and 'error' not in r]
+                    
+                    if time_vals:
+                        organized_data[strategy][p]['n'].append(n)
+                        organized_data[strategy][p]['time'].append(sum(time_vals) / len(time_vals))
+                        organized_data[strategy][p]['nodes'].append(sum(node_vals) / len(node_vals) if node_vals else 0)
+
+    # Tracer
+    for strategy in strategies_to_plot:
+        color = strategy_colors.get(strategy, 'black')
+        strategy_label = strategy_names.get(strategy, strategy)
+        
+        for p in organized_data[strategy]:
+            data = organized_data[strategy][p]
+            if not data['n']:
+                continue
+                
+            linestyle = p_linestyles.get(p, '-')
+            p_label = p_labels.get(p, f'p={p:.3f}')
+            
+            # Label complet: stratégie + p
+            full_label = f"{strategy_label} ({p_label})"
+            
+            sorted_indices = sorted(range(len(data['n'])), key=lambda i: data['n'][i])
+            sorted_n = [data['n'][i] for i in sorted_indices]
+            sorted_time = [data['time'][i] for i in sorted_indices]
+            sorted_nodes = [data['nodes'][i] for i in sorted_indices]
+            
+            log_time = [math.log2(t) if t and t > 0 else 0 for t in sorted_time]
+
+            ax1.plot(sorted_n, log_time, color=color, linestyle=linestyle,
+                    marker='o', markersize=4, label=full_label, linewidth=1.5)
+            ax2.plot(sorted_n, sorted_nodes, color=color, linestyle=linestyle,
+                    marker='o', markersize=4, label=full_label, linewidth=1.5)
+
+    # Configuration
+    ax1.set_xlabel('n (nombre de sommets)')
+    ax1.set_ylabel('log₂(temps en secondes)')
+    ax1.set_title(f'Comparaison complète - Temps {title_suffix}')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=8, loc='best')
+
+    ax2.set_xlabel('n (nombre de sommets)')
+    ax2.set_ylabel('nœuds générés')
+    ax2.set_title(f'Comparaison complète - Nœuds générés {title_suffix}')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=8, loc='best')
+
+    plt.tight_layout()
+    plt.show()
+
+def tracer_comparaison_strategies_par_strategie(all_results, strategies_to_plot=None, title_suffix=""):
+    """
+    Graphique avec sous-graphiques séparés pour chaque stratégie
+    """
+    keys = list(all_results.keys())
+    if not keys:
+        print("Aucune donnée à tracer!")
+        return
+        
+    ns = sorted({k[0] for k in keys})
+    ps_to_plot = sorted({k[1] for k in keys})
+    
+    if strategies_to_plot is None:
+        example_key = keys[0]
+        strategies_to_plot = list(all_results[example_key].keys())
+
+    # Configuration des couleurs et styles
+    p_colors = {0.1: 'blue', 0.3: 'red', 0.5: 'green', 
+                0.3536: 'orange', 0.3162: 'orange', 0.2887: 'orange', 
+                0.2673: 'orange', 0.2500: 'orange'}
+    
+    p_linestyles = {0.1: '-', 0.3: '--', 0.5: ':', 
+                   0.3536: '-.', 0.3162: '-.', 0.2887: '-.', 
+                   0.2673: '-.', 0.2500: '-.'}
+    
+    p_labels = {0.1: 'p=0.1', 0.3: 'p=0.3', 0.5: 'p=0.5',
+               0.3536: 'p=1/√8', 0.3162: 'p=1/√10', 0.2887: 'p=1/√12',
+               0.2673: 'p=1/√14', 0.2500: 'p=1/√16'}
+    
+    strategy_names = {
+        'simple': 'Branchement simple',
+        'couplage_borne': 'Avec couplage et bornes', 
+        'glouton': 'Avec glouton seulement',
+        'bornes': 'Avec bornes seulement',
+        'couplage': 'Avec couplage seulement',
+        'glouton_borne': 'Avec glouton et bornes'
+    }
+
+    # Créer les sous-graphiques
+    n_strategies = len(strategies_to_plot)
+    fig, axes = plt.subplots(n_strategies, 2, figsize=(15, 4 * n_strategies))
+    
+    if n_strategies == 1:
+        axes = [axes]
+
+    # Organiser les données
+    organized_data = {}
+    for strategy in strategies_to_plot:
+        organized_data[strategy] = {}
+        for p in ps_to_plot:
+            organized_data[strategy][p] = {'n': [], 'time': [], 'nodes': []}
+
+    # Remplir les données
+    for n in ns:
+        for p in ps_to_plot:
+            key = (n, p)
+            if key not in all_results:
+                continue
+            for strategy in strategies_to_plot:
+                records = all_results[key].get(strategy, [])
+                time_vals = [r['time'] for r in records if r.get('time') and r['time'] > 0 and not r.get('timeout') and 'error' not in r]
+                node_vals = [r['nodes'] for r in records if r.get('nodes') and not r.get('timeout') and 'error' not in r]
+                
+                if time_vals:
+                    organized_data[strategy][p]['n'].append(n)
+                    organized_data[strategy][p]['time'].append(sum(time_vals) / len(time_vals))
+                    organized_data[strategy][p]['nodes'].append(sum(node_vals) / len(node_vals) if node_vals else 0)
+
+    # Tracer
+    for i, strategy in enumerate(strategies_to_plot):
+        ax1, ax2 = axes[i]
+        strategy_data = organized_data[strategy]
+        
+        # Tracer pour chaque p
+        for p in ps_to_plot:
+            data = strategy_data[p]
+            if not data['n']:
+                continue
+                
+            color = p_colors.get(p, 'gray')
+            linestyle = p_linestyles.get(p, '-')
+            p_label = p_labels.get(p, f'p={p:.3f}')
+            
+            sorted_indices = sorted(range(len(data['n'])), key=lambda i: data['n'][i])
+            sorted_n = [data['n'][i] for i in sorted_indices]
+            sorted_time = [data['time'][i] for i in sorted_indices]
+            sorted_nodes = [data['nodes'][i] for i in sorted_indices]
+            
+            log_time = [math.log2(t) if t and t > 0 else 0 for t in sorted_time]
+
+            ax1.plot(sorted_n, log_time, color=color, linestyle=linestyle,
+                    marker='o', markersize=4, label=p_label, linewidth=2)
+            ax2.plot(sorted_n, sorted_nodes, color=color, linestyle=linestyle,
+                    marker='o', markersize=4, label=p_label, linewidth=2)
+
+        # Configuration des sous-graphiques
+        strategy_name = strategy_names.get(strategy, strategy)
+        ax1.set_xlabel('n (nombre de sommets)')
+        ax1.set_ylabel('log₂(temps en secondes)')
+        ax1.set_title(f'{strategy_name} - Temps {title_suffix}')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend(fontsize=9)
+
+        ax2.set_xlabel('n (nombre de sommets)')
+        ax2.set_ylabel('nœuds générés')
+        ax2.set_title(f'{strategy_name} - Nœuds générés {title_suffix}')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend(fontsize=9)
+
+    plt.tight_layout()
+    plt.show()
+
+def tracer_comparaison_strategies_par_p(all_results, strategies_to_plot=None, p_value=0.3, title_suffix=""):
+    """
+    Graphique pour une valeur de p spécifique
+    """
+    keys = list(all_results.keys())
+    if not keys:
+        print("Aucune donnée à tracer!")
+        return
+        
+    # Filtrer pour la valeur de p spécifique
+    filtered_keys = [key for key in keys if abs(key[1] - p_value) < 0.01]
+    if not filtered_keys:
+        print(f"Aucune donnée pour p={p_value}!")
+        return
+        
+    ns = sorted({k[0] for k in filtered_keys})
+    
+    if strategies_to_plot is None:
+        example_key = filtered_keys[0]
+        strategies_to_plot = list(all_results[example_key].keys())
+
+    # Couleurs pour les stratégies
+    strategy_colors = {
+        'simple': 'blue', 'couplage_borne': 'green', 'glouton': 'red',
+        'bornes': 'orange', 'couplage': 'purple', 'glouton_borne': 'brown'
+    }
+    
+    strategy_markers = {
+        'simple': 'o', 'couplage_borne': 's', 'glouton': '^',
+        'bornes': 'D', 'couplage': 'v', 'glouton_borne': '*'
+    }
+    
+    strategy_names = {
+        'simple': 'Branchement simple',
+        'couplage_borne': 'Avec couplage et bornes', 
+        'glouton': 'Avec glouton seulement',
+        'bornes': 'Avec bornes seulement',
+        'couplage': 'Avec couplage seulement',
+        'glouton_borne': 'Avec glouton et bornes'
     }
 
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
     ax1, ax2 = axes
 
-    organized_data = {}
-    for p in ps_to_plot:
-        organized_data[p] = {'n': [], 'time': [], 'nodes': []}
-    
-    for n in ns:
-        for p in ps_to_plot:
-            if p == '1/sqrt':
-                actual_p = 1.0 / math.sqrt(n)
-            else:
-                actual_p = p
-                
-            key = (n, actual_p)
-            if key not in all_results:
-                continue
-                
-            all_times = []
-            all_nodes = []
-            
-            for strategy in strategies_to_plot:
-                records = all_results[key].get(strategy, [])
-                if records:
-                    time_vals = [r['time'] for r in records if r.get('time') is not None and r['time'] > 0]
-                    nodes_vals = [r['nodes'] for r in records if r.get('nodes') is not None]
-                    
-                    if time_vals:
-                        all_times.extend(time_vals)
-                    
-                    if nodes_vals:
-                        all_nodes.extend(nodes_vals)
-            
-            if all_times:
-                mean_time = sum(all_times) / len(all_times)
-                organized_data[p]['n'].append(n)
-                organized_data[p]['time'].append(mean_time)
-                
-                if all_nodes:
-                    mean_nodes = sum(all_nodes) / len(all_nodes)
-                    organized_data[p]['nodes'].append(mean_nodes)
-                else:
-                    organized_data[p]['nodes'].append(float('nan'))
+    # Organiser les données
+    organized_data = {s: {'n': [], 'time': [], 'nodes': []} for s in strategies_to_plot}
 
-    for p in ps_to_plot:
-        data = organized_data[p]
+    for n in ns:
+        for strategy in strategies_to_plot:
+            key = (n, p_value)
+            if key in all_results:
+                records = all_results[key].get(strategy, [])
+                time_vals = [r['time'] for r in records if r.get('time') and r['time'] > 0 and not r.get('timeout') and 'error' not in r]
+                node_vals = [r['nodes'] for r in records if r.get('nodes') and not r.get('timeout') and 'error' not in r]
+                
+                if time_vals:
+                    organized_data[strategy]['n'].append(n)
+                    organized_data[strategy]['time'].append(sum(time_vals) / len(time_vals))
+                    organized_data[strategy]['nodes'].append(sum(node_vals) / len(node_vals) if node_vals else 0)
+
+    # Tracer
+    for strategy in strategies_to_plot:
+        data = organized_data[strategy]
         if not data['n']:
             continue
             
-        color = p_colors.get(p, 'black')
-        marker = p_markers.get(p, 'o')
-        label = p_labels.get(p, f'p={p}')
+        color = strategy_colors.get(strategy, 'black')
+        marker = strategy_markers.get(strategy, 'o')
+        label = strategy_names.get(strategy, strategy)
         
-        sorted_data = sorted(zip(data['n'], data['time'], data['nodes']))
-        sorted_n = [item[0] for item in sorted_data]
-        sorted_time = [item[1] for item in sorted_data]
-        sorted_nodes = [item[2] for item in sorted_data]
+        sorted_indices = sorted(range(len(data['n'])), key=lambda i: data['n'][i])
+        sorted_n = [data['n'][i] for i in sorted_indices]
+        sorted_time = [data['time'][i] for i in sorted_indices]
+        sorted_nodes = [data['nodes'][i] for i in sorted_indices]
         
-        log_time = [math.log2(t) if t and t > 0 else float('nan') 
-                   for t in sorted_time]
+        log_time = [math.log2(t) if t and t > 0 else 0 for t in sorted_time]
 
         ax1.plot(sorted_n, log_time, color=color, marker=marker, 
                 linestyle='-', label=label, linewidth=2, markersize=6)
-        
         ax2.plot(sorted_n, sorted_nodes, color=color, marker=marker, 
                 linestyle='-', label=label, linewidth=2, markersize=6)
 
-    # Configurer le premier graphique (semi-log)
+    # Configuration
     ax1.set_xlabel('n (nombre de sommets)')
     ax1.set_ylabel('log₂(temps en secondes)')
-    ax1.set_title(f'Semi-log: log₂(temps) vs n {title_suffix}')
+    ax1.set_title(f'Comparaison des stratégies (p={p_value}) - Temps {title_suffix}')
     ax1.grid(True, alpha=0.3)
     ax1.legend(fontsize=10, loc='best')
 
-    # Configurer le deuxième graphique (linéaire)
     ax2.set_xlabel('n (nombre de sommets)')
     ax2.set_ylabel('nœuds générés')
-    ax2.set_title(f'Nœuds générés vs n {title_suffix}')
+    ax2.set_title(f'Comparaison des stratégies (p={p_value}) - Nœuds générés {title_suffix}')
     ax2.grid(True, alpha=0.3)
     ax2.legend(fontsize=10, loc='best')
 
     plt.tight_layout()
     plt.show()
 
-    # Afficher un résumé statistique
-    print("\n=== RÉSUMÉ STATISTIQUE ===")
-    for p in ps_to_plot:
-        print(f"\n{p_labels.get(p, f'p={p}')}:")
-        total_time = 0
-        total_nodes = 0
-        count = 0
+def tracer_comparaison_strategies_simple(all_results, strategies_to_plot=None, title_suffix=""):
+    """
+    Graphique comparatif simple - toutes stratégies sur mêmes axes (moyenne sur tous les p)
+    """
+    keys = list(all_results.keys())
+    if not keys:
+        print("Aucune donnée à tracer!")
+        return
         
-        for key in keys:
-            n, actual_p = key
-            if p == '1/sqrt':
-                expected_p = 1.0 / math.sqrt(n)
-                if abs(actual_p - expected_p) > 1e-10:
-                    continue
-            else:
-                if actual_p != p:
-                    continue
+    ns = sorted({k[0] for k in keys})
+    
+    if strategies_to_plot is None:
+        example_key = keys[0]
+        strategies_to_plot = list(all_results[example_key].keys())
+
+    # Couleurs pour les stratégies
+    strategy_colors = {
+        'simple': 'blue', 'couplage_borne': 'green', 'glouton': 'red',
+        'bornes': 'orange', 'couplage': 'purple', 'glouton_borne': 'brown'
+    }
+    
+    strategy_markers = {
+        'simple': 'o', 'couplage_borne': 's', 'glouton': '^',
+        'bornes': 'D', 'couplage': 'v', 'glouton_borne': '*'
+    }
+    
+    strategy_names = {
+        'simple': 'Branchement simple',
+        'couplage_borne': 'Avec couplage et bornes', 
+        'glouton': 'Avec glouton seulement',
+        'bornes': 'Avec bornes seulement',
+        'couplage': 'Avec couplage seulement',
+        'glouton_borne': 'Avec glouton et bornes'
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    ax1, ax2 = axes
+
+    # Organiser les données (moyenne sur tous les p)
+    organized_data = {s: {'n': [], 'time': [], 'nodes': []} for s in strategies_to_plot}
+
+    for n in ns:
+        for strategy in strategies_to_plot:
+            time_vals = []
+            node_vals = []
             
-            for strategy in strategies_to_plot:
-                records = all_results[key].get(strategy, [])
-                for record in records:
-                    if record.get('time') is not None:
-                        total_time += record['time']
-                        count += 1
-                    if record.get('nodes') is not None:
-                        total_nodes += record['nodes']
+            # Prendre la moyenne sur tous les p pour ce n
+            for key in keys:
+                if key[0] == n:
+                    records = all_results[key].get(strategy, [])
+                    time_vals.extend([r['time'] for r in records if r.get('time') and r['time'] > 0 and not r.get('timeout') and 'error' not in r])
+                    node_vals.extend([r['nodes'] for r in records if r.get('nodes') and not r.get('timeout') and 'error' not in r])
+            
+            if time_vals:
+                organized_data[strategy]['n'].append(n)
+                organized_data[strategy]['time'].append(sum(time_vals) / len(time_vals))
+                organized_data[strategy]['nodes'].append(sum(node_vals) / len(node_vals) if node_vals else 0)
+
+    # Tracer
+    for strategy in strategies_to_plot:
+        data = organized_data[strategy]
+        if not data['n']:
+            continue
+            
+        color = strategy_colors.get(strategy, 'black')
+        marker = strategy_markers.get(strategy, 'o')
+        label = strategy_names.get(strategy, strategy)
         
-        if count > 0:
-            avg_time = total_time / count
-            avg_nodes = total_nodes / count if count > 0 else 0
-            print(f"  Temps moyen: {avg_time:.4f}s")
-            print(f"  Nœuds moyens: {avg_nodes:.0f}")
+        sorted_indices = sorted(range(len(data['n'])), key=lambda i: data['n'][i])
+        sorted_n = [data['n'][i] for i in sorted_indices]
+        sorted_time = [data['time'][i] for i in sorted_indices]
+        sorted_nodes = [data['nodes'][i] for i in sorted_indices]
+        
+        log_time = [math.log2(t) if t and t > 0 else 0 for t in sorted_time]
+
+        ax1.plot(sorted_n, log_time, color=color, marker=marker, 
+                linestyle='-', label=label, linewidth=2, markersize=6)
+        ax2.plot(sorted_n, sorted_nodes, color=color, marker=marker, 
+                linestyle='-', label=label, linewidth=2, markersize=6)
+
+    # Configuration
+    ax1.set_xlabel('n (nombre de sommets)')
+    ax1.set_ylabel('log₂(temps en secondes)')
+    ax1.set_title(f'Comparaison simplifiée - Temps {title_suffix}')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=10, loc='best')
+
+    ax2.set_xlabel('n (nombre de sommets)')
+    ax2.set_ylabel('nœuds générés')
+    ax2.set_title(f'Comparaison simplifiée - Nœuds générés {title_suffix}')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=10, loc='best')
+
+    plt.tight_layout()
+    plt.show()
 
 def tester_branchement_ameliores(n_values, p_values_labels, num_instances=3, max_time_par_instance=30):
     """
@@ -2299,7 +2568,7 @@ def tester_algorithme_universel_ameliore(current_graph=None):
         print("   5. Branchement avec glouton seulement")
         print("   6. Branchement avec bornes seulement")
         print("   7. Branchement avec couplage seulement")
-        print("   8. Branchement glouton avec borne")
+        print("   8. Branchement avec glouton et bornes")
         
         print("\n🔹 BRANCHEMENTS AMÉLIORÉS:")
         print("   9. Branchement amélioré v1")
@@ -2352,7 +2621,7 @@ def tester_algorithme_universel_ameliore(current_graph=None):
             '5': ("Branchement avec glouton seulement", graphe.branchement_avec_glouton_seulement, True),
             '6': ("Branchement avec bornes seulement", graphe.branchement_avec_bornes_seulement, True),
             '7': ("Branchement avec couplage seulement", graphe.branchement_avec_couplage_seulement, True),
-            '8': ("Branchement glouton avec borne", graphe.branchement_glouton_avec_borne, True),
+            '8': ("Branchement avec glouton et bornes", graphe.branchement_glouton_avec_borne, True),
             '9': ("Branchement amélioré v1", graphe.branchement_ameliore_v1, True),
             '10': ("Branchement amélioré v2", graphe.branchement_ameliore_v2, True),
             '11': ("Branchement amélioré v3", graphe.branchement_ameliore_v3, True),
@@ -2520,7 +2789,7 @@ def tester_tous_algorithmes_branchement(graphe):
         ("Branchement avec glouton seulement", graphe.branchement_avec_glouton_seulement),
         ("Branchement avec bornes seulement", graphe.branchement_avec_bornes_seulement),
         ("Branchement avec couplage seulement", graphe.branchement_avec_couplage_seulement),
-        ("Branchement glouton avec borne", graphe.branchement_glouton_avec_borne),
+        ("Branchement avec glouton et bornes", graphe.branchement_glouton_avec_borne),
         ("Branchement amélioré v1", graphe.branchement_ameliore_v1),
         ("Branchement amélioré v2", graphe.branchement_ameliore_v2),
         ("Branchement amélioré v3", graphe.branchement_ameliore_v3)
@@ -2835,13 +3104,38 @@ def main():
                     strategies_to_run=methods_to_test
                 )
 
-                # 4. Tracer les résultats
-                tracer_comparaison_strategies(all_results, strategies_to_plot=methods_to_test,
-                                            title_suffix=f"(instances={num_instances})")
+                # 4. Options d'affichage des résultats
+                print("\n" + "="*50)
+                print("OPTIONS D'AFFICHAGE DES RÉSULTATS")
+                print("="*50)
+                print("1. Graphique complet (toutes les stratégies et tous les p)")
+                print("2. Graphique par stratégie (chaque stratégie a ses propres sous-graphiques)")
+                print("3. Graphique pour une valeur de p spécifique")
+                print("4. Graphique comparatif simple (toutes stratégies sur mêmes axes)")
+                
+                affichage_choice = input("Choisissez le type d'affichage (1-4): ").strip()
+                
+                if affichage_choice == "1":
+                    tracer_comparaison_strategies_complet(all_results, strategies_to_plot=methods_to_test,
+                                                        title_suffix=f"(instances={num_instances})")
+                elif affichage_choice == "2":
+                    tracer_comparaison_strategies_par_strategie(all_results, strategies_to_plot=methods_to_test,
+                                                              title_suffix=f"(instances={num_instances})")
+                elif affichage_choice == "3":
+                    p_choisi = float(input("Entrez la valeur de p à afficher (ex: 0.3): ").strip())
+                    tracer_comparaison_strategies_par_p(all_results, strategies_to_plot=methods_to_test,
+                                                      p_value=p_choisi, title_suffix=f"(instances={num_instances})")
+                elif affichage_choice == "4":
+                    tracer_comparaison_strategies_simple(all_results, strategies_to_plot=methods_to_test,
+                                                       title_suffix=f"(instances={num_instances})")
+                else:
+                    print("Option invalide, utilisation de l'affichage par défaut.")
+                    tracer_comparaison_strategies_complet(all_results, strategies_to_plot=methods_to_test,
+                                                        title_suffix=f"(instances={num_instances})")
 
             except Exception as e:
                 print(f"✗ Erreur lors des tests de performance: {e}")
-
+                
         elif choix == "8":
             # Vérification par force brute
             if current_graph is None:
@@ -3007,12 +3301,8 @@ def main():
         # Pause avant de revenir au menu
         if choix not in ["6", "7", "9", "10", "11", "12"]:  # Pas de pause après les tests automatiques
             input("\nAppuyez sur Entrée pour continuer...")
-
-# Point d'entrée du programme
-if __name__ == "__main__":
-    # Exemple d'utilisation rapide (décommentez pour tester)
-    # Ces tests seront exécutés avant d'afficher le menu
-    
+            
+if __name__ == "__main__": 
     print("Initialisation...")
     
     # Test avec un graphe chemin
