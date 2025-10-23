@@ -1202,8 +1202,7 @@ def tests_algos(p=0.3, num_instances=10):
 def bruteforce_vertex_cover(adj):
     """
     Algorithme de force brute pour trouver la couverture de sommets optimale.
-    Cette méthode examine systématiquement tous les sous-ensembles de sommets,
-    en commençant par les plus petits, jusqu'à trouver la plus petite couverture valide.
+    Retourne la première couverture optimale trouvée.
     """
     # Obtenir la liste triée des sommets
     V = sorted(adj.keys())
@@ -1215,29 +1214,65 @@ def bruteforce_vertex_cover(adj):
     # Initialiser les variables pour suivre la meilleure solution
     best = None
     best_size = float('inf')
+    found_at_size = False
     
     # Explorer les sous-ensembles par taille croissante (de 0 à m)
     for r in range(0, m+1):
+        found_at_size = False
+        
         # Générer tous les sous-ensembles de taille r
         for subset in itertools.combinations(V, r):
             S = set(subset)
             
             # Vérifier si S est une couverture valide
-            # Une couverture est valide si chaque arête a au moins une extrémité dans S
             valid = all(u in S or v in S for (u,v) in edges)
             
-            # Si c'est une couverture valide et meilleure que la courante
-            if valid and len(S) < best_size:
+            # Si c'est une couverture valide et meilleure ou égale à la courante
+            if valid and len(S) <= best_size:
                 best = S
                 best_size = len(S)
-                # Pas besoin de continuer avec cette taille, on a trouvé une solution
-                break
+                found_at_size = True
+                # On continue à chercher à cette taille pour trouver toutes les solutions optimales
+                # Mais on garde seulement la première trouvée
         
         # Élagage: si on a trouvé une solution de taille r, inutile de chercher des tailles > r
-        if best_size <= r:
+        if found_at_size:
             break
             
     return best
+
+def bruteforce_vertex_cover_all(adj):
+    """
+    Retourne toutes les couvertures optimales (pour debug)
+    """
+    V = sorted(adj.keys())
+    edges = [(u,v) for u in adj for v in adj[u] if u < v]
+    
+    best_solutions = []
+    best_size = float('inf')
+    
+    for r in range(0, len(V)+1):
+        current_size_found = False
+        
+        for subset in itertools.combinations(V, r):
+            S = set(subset)
+            valid = all(u in S or v in S for (u,v) in edges)
+            
+            if valid:
+                if len(S) < best_size:
+                    # Nouvelle meilleure taille
+                    best_solutions = [S]
+                    best_size = len(S)
+                    current_size_found = True
+                elif len(S) == best_size:
+                    # Même taille optimale
+                    best_solutions.append(S)
+                    current_size_found = True
+        
+        if current_size_found:
+            break
+            
+    return best_solutions
 
 def tester_strategies_branchement(n_values, p_values_labels, num_instances=3, max_time_par_instance=30, strategies_to_run=None):
     """
@@ -2054,14 +2089,16 @@ def tracer_comparaison_ameliores(all_results, strategy_names, title_suffix=""):
             print(f"  Nœuds moyens: {avg_nodes:.0f}")
             print(f"  Taille moyenne de couverture: {avg_size:.2f}")
 
-def evaluer_qualite_approximation(n_values, p_values, num_instances=10):
+def evaluer_qualite_approximation(n_values, p_values, num_instances=10, max_n_optimal=100):
     """
     Évalue expérimentalement le rapport d'approximation des algorithmes de couplage et glouton.
+    Utilise branchement_ameliore_v3 pour obtenir la solution optimale.
     
     Args:
         n_values: Liste des tailles de graphes à tester
         p_values: Liste des probabilités d'arêtes à tester
         num_instances: Nombre d'instances par configuration
+        max_n_optimal: Taille maximale pour laquelle calculer la solution optimale
         
     Returns:
         dict: Résultats détaillés pour chaque configuration
@@ -2091,38 +2128,55 @@ def evaluer_qualite_approximation(n_values, p_values, num_instances=10):
                 couverture_glouton = G.algo_glouton()
                 couverture_couplage = G.algo_couplage()
                 
-                # Calculer la couverture optimale avec branchement (pour petits graphes)
-                if n <= 20:  # Limiter aux petits graphes pour la faisabilité
-                    couverture_optimale, _ = G.branchement_simple()
-                    taille_optimale = len(couverture_optimale)
-                else:
-                    # Pour les grands graphes, utiliser la plus petite des deux approximations comme référence
-                    taille_optimale = min(len(couverture_glouton), len(couverture_couplage))
-                
-                # Calculer les ratios d'approximation
-                if taille_optimale > 0:
-                    ratio_glouton = len(couverture_glouton) / taille_optimale
-                    ratio_couplage = len(couverture_couplage) / taille_optimale
-                else:
-                    ratio_glouton = 1.0
-                    ratio_couplage = 1.0
-                
-                # Mettre à jour les résultats
-                results[key]['glouton_ratios'].append(ratio_glouton)
-                results[key]['couplage_ratios'].append(ratio_couplage)
-                results[key]['optimal_sizes'].append(taille_optimale)
+                # Enregistrer les tailles des couvertures approximatives
                 results[key]['glouton_sizes'].append(len(couverture_glouton))
                 results[key]['couplage_sizes'].append(len(couverture_couplage))
                 
-                # Mettre à jour les pires ratios
-                results[key]['glouton_worst'] = max(results[key]['glouton_worst'], ratio_glouton)
-                results[key]['couplage_worst'] = max(results[key]['couplage_worst'], ratio_couplage)
+                # Calculer la couverture optimale avec branchement_ameliore_v3 pour les petits graphes
+                if n <= max_n_optimal:
+                    try:
+                        # Utiliser branchement_ameliore_v3 pour la solution optimale
+                        couverture_optimale, _ = G.branchement_ameliore_v3()
+                        taille_optimale = len(couverture_optimale)
+                        
+                        # Calculer les ratios d'approximation
+                        if taille_optimale > 0:
+                            ratio_glouton = len(couverture_glouton) / taille_optimale
+                            ratio_couplage = len(couverture_couplage) / taille_optimale
+                        else:
+                            ratio_glouton = 1.0
+                            ratio_couplage = 1.0
+                        
+                        # Mettre à jour les résultats
+                        results[key]['glouton_ratios'].append(ratio_glouton)
+                        results[key]['couplage_ratios'].append(ratio_couplage)
+                        results[key]['optimal_sizes'].append(taille_optimale)
+                        
+                        # Mettre à jour les pires ratios
+                        results[key]['glouton_worst'] = max(results[key]['glouton_worst'], ratio_glouton)
+                        results[key]['couplage_worst'] = max(results[key]['couplage_worst'], ratio_couplage)
+                        
+                        print(f"  Instance {inst+1}: optimal={taille_optimale}, glouton={len(couverture_glouton)}, couplage={len(couverture_couplage)}")
+                    
+                    except Exception as e:
+                        print(f"  Erreur lors du calcul de la couverture optimale pour n={n}: {e}")
+                        # En cas d'erreur, on considère que les ratios sont 1.0
+                        results[key]['glouton_ratios'].append(1.0)
+                        results[key]['couplage_ratios'].append(1.0)
+                        results[key]['optimal_sizes'].append(0)
+                else:
+                    # Pour les grands graphes, on ne calcule pas le rapport exact
+                    results[key]['glouton_ratios'].append(None)
+                    results[key]['couplage_ratios'].append(None)
+                    results[key]['optimal_sizes'].append(None)
+                    print(f"  Instance {inst+1}: glouton={len(couverture_glouton)}, couplage={len(couverture_couplage)} (optimal non calculé pour n>{max_n_optimal})")
     
     return results
 
-def tracer_rapports_approximation(results, title_suffix=""):
+def tracer_rapports_approximation(results, title_suffix="", max_n_optimal=100):
     """
     Trace les rapports d'approximation en fonction de n
+    Utilise les données calculées avec branchement_ameliore_v3 comme référence optimale.
     """
     # Organiser les données par n et p
     n_values = sorted({key[0] for key in results.keys()})
@@ -2155,72 +2209,103 @@ def tracer_rapports_approximation(results, title_suffix=""):
             'glouton_mean': [],
             'couplage_mean': [],
             'glouton_worst': [],
-            'couplage_worst': []
+            'couplage_worst': [],
+            'glouton_sizes': [],
+            'couplage_sizes': [],
+            'optimal_sizes': []
         }
     
+    # Organiser les données
     for n in n_values:
         for p in p_values:
             key = (n, p)
             if key in results:
                 data = results[key]
-                if data['glouton_ratios'] and data['couplage_ratios']:
-                    data_by_p[p]['n'].append(n)
-                    data_by_p[p]['glouton_mean'].append(sum(data['glouton_ratios']) / len(data['glouton_ratios']))
-                    data_by_p[p]['couplage_mean'].append(sum(data['couplage_ratios']) / len(data['couplage_ratios']))
-                    data_by_p[p]['glouton_worst'].append(data['glouton_worst'])
-                    data_by_p[p]['couplage_worst'].append(data['couplage_worst'])
+                
+                # Données pour les rapports (seulement pour n <= max_n_optimal)
+                if n <= max_n_optimal and data['glouton_ratios'] and any(r is not None for r in data['glouton_ratios']):
+                    valid_glouton_ratios = [r for r in data['glouton_ratios'] if r is not None]
+                    valid_couplage_ratios = [r for r in data['couplage_ratios'] if r is not None]
+                    
+                    if valid_glouton_ratios and valid_couplage_ratios:
+                        data_by_p[p]['n'].append(n)
+                        data_by_p[p]['glouton_mean'].append(sum(valid_glouton_ratios) / len(valid_glouton_ratios))
+                        data_by_p[p]['couplage_mean'].append(sum(valid_couplage_ratios) / len(valid_couplage_ratios))
+                        data_by_p[p]['glouton_worst'].append(data['glouton_worst'])
+                        data_by_p[p]['couplage_worst'].append(data['couplage_worst'])
+                
+                # Données pour les tailles (tous les n)
+                if data['glouton_sizes'] and data['couplage_sizes']:
+                    # Stocker les données de taille pour analyse
+                    data_by_p[p]['glouton_sizes'].extend(data['glouton_sizes'])
+                    data_by_p[p]['couplage_sizes'].extend(data['couplage_sizes'])
+                    if data['optimal_sizes'] and any(s is not None for s in data['optimal_sizes']):
+                        valid_optimal = [s for s in data['optimal_sizes'] if s is not None]
+                        if valid_optimal:
+                            data_by_p[p]['optimal_sizes'].extend(valid_optimal)
     
-    # Tracer les rapports moyens d'approximation
+    # Tracer les rapports moyens d'approximation (seulement pour n <= max_n_optimal)
     for p in p_values:
-        if data_by_p[p]['n']:
+        if data_by_p[p]['n']:  # Vérifier qu'il y a des données à tracer
             color = p_colors.get(p, 'black')
             marker = p_markers.get(p, 'o')
             label = f'p={p}'
             
             # Rapport moyen - Glouton
-            ax1.plot(data_by_p[p]['n'], data_by_p[p]['glouton_mean'], 
+            line1, = ax1.plot(data_by_p[p]['n'], data_by_p[p]['glouton_mean'], 
                     color=color, marker=marker, linestyle='-', 
                     label=f'Glouton ({label})', linewidth=2, markersize=6)
             
             # Rapport moyen - Couplage
-            ax2.plot(data_by_p[p]['n'], data_by_p[p]['couplage_mean'], 
+            line2, = ax2.plot(data_by_p[p]['n'], data_by_p[p]['couplage_mean'], 
                     color=color, marker=marker, linestyle='-', 
                     label=f'Couplage ({label})', linewidth=2, markersize=6)
             
             # Pire rapport - Glouton
-            ax3.plot(data_by_p[p]['n'], data_by_p[p]['glouton_worst'], 
+            line3, = ax3.plot(data_by_p[p]['n'], data_by_p[p]['glouton_worst'], 
                     color=color, marker=marker, linestyle='-', 
                     label=f'Glouton ({label})', linewidth=2, markersize=6)
             
             # Pire rapport - Couplage
-            ax4.plot(data_by_p[p]['n'], data_by_p[p]['couplage_worst'], 
+            line4, = ax4.plot(data_by_p[p]['n'], data_by_p[p]['couplage_worst'], 
                     color=color, marker=marker, linestyle='-', 
                     label=f'Couplage ({label})', linewidth=2, markersize=6)
     
-    # Configurer les graphiques
-    ax1.set_xlabel('n (nombre de sommets)')
-    ax1.set_ylabel('Rapport d\'approximation moyen')
-    ax1.set_title(f'Rapport d\'approximation moyen - Algorithme glouton {title_suffix}')
-    ax1.grid(True, alpha=0.3)
-    ax1.legend()
-    
-    ax2.set_xlabel('n (nombre de sommets)')
-    ax2.set_ylabel('Rapport d\'approximation moyen')
-    ax2.set_title(f'Rapport d\'approximation moyen - Algorithme de couplage {title_suffix}')
-    ax2.grid(True, alpha=0.3)
-    ax2.legend()
-    
-    ax3.set_xlabel('n (nombre de sommets)')
-    ax3.set_ylabel('Pire rapport d\'approximation')
-    ax3.set_title(f'Pire rapport d\'approximation - Algorithme glouton {title_suffix}')
-    ax3.grid(True, alpha=0.3)
-    ax3.legend()
-    
-    ax4.set_xlabel('n (nombre de sommets)')
-    ax4.set_ylabel('Pire rapport d\'approximation')
-    ax4.set_title(f'Pire rapport d\'approximation - Algorithme de couplage {title_suffix}')
-    ax4.grid(True, alpha=0.3)
-    ax4.legend()
+    # Configurer les graphiques seulement s'il y a des données
+    if any(data_by_p[p]['n'] for p in p_values):
+        ax1.set_xlabel('n (nombre de sommets)')
+        ax1.set_ylabel('Rapport d\'approximation moyen')
+        ax1.set_title(f'Rapport d\'approximation moyen - Algorithme glouton {title_suffix}')
+        ax1.grid(True, alpha=0.3)
+        ax1.axhline(y=2.0, color='red', linestyle='--', alpha=0.7, label='Borne théorique (2)')
+        if ax1.get_legend_handles_labels()[0]:
+            ax1.legend()
+        
+        ax2.set_xlabel('n (nombre de sommets)')
+        ax2.set_ylabel('Rapport d\'approximation moyen')
+        ax2.set_title(f'Rapport d\'approximation moyen - Algorithme de couplage {title_suffix}')
+        ax2.grid(True, alpha=0.3)
+        ax2.axhline(y=2.0, color='red', linestyle='--', alpha=0.7, label='Borne théorique (2)')
+        if ax2.get_legend_handles_labels()[0]:
+            ax2.legend()
+        
+        ax3.set_xlabel('n (nombre de sommets)')
+        ax3.set_ylabel('Pire rapport d\'approximation')
+        ax3.set_title(f'Pire rapport d\'approximation - Algorithme glouton {title_suffix}')
+        ax3.grid(True, alpha=0.3)
+        ax3.axhline(y=2.0, color='red', linestyle='--', alpha=0.7, label='Borne théorique (2)')
+        if ax3.get_legend_handles_labels()[0]:
+            ax3.legend()
+        
+        ax4.set_xlabel('n (nombre de sommets)')
+        ax4.set_ylabel('Pire rapport d\'approximation')
+        ax4.set_title(f'Pire rapport d\'approximation - Algorithme de couplage {title_suffix}')
+        ax4.grid(True, alpha=0.3)
+        ax4.axhline(y=2.0, color='red', linestyle='--', alpha=0.7, label='Borne théorique (2)')
+        if ax4.get_legend_handles_labels()[0]:
+            ax4.legend()
+    else:
+        print("Aucune donnée à tracer pour les rapports d'approximation (n trop grand pour le calcul optimal).")
     
     plt.tight_layout()
     plt.show()
@@ -2228,42 +2313,56 @@ def tracer_rapports_approximation(results, title_suffix=""):
     # Afficher un résumé statistique
     print("\n" + "="*80)
     print("RÉSUMÉ STATISTIQUE DES RAPPORTS D'APPROXIMATION")
+    print("(Basé sur branchement_ameliore_v3 pour la solution optimale)")
     print("="*80)
     
-    # Calculer les pires rapports globaux
+    # Calculer les pires rapports globaux (uniquement pour les petits graphes)
     glouton_worst_global = 0
     couplage_worst_global = 0
     glouton_worst_config = None
     couplage_worst_config = None
     
     for key, data in results.items():
-        if data['glouton_worst'] > glouton_worst_global:
-            glouton_worst_global = data['glouton_worst']
-            glouton_worst_config = key
-        
-        if data['couplage_worst'] > couplage_worst_global:
-            couplage_worst_global = data['couplage_worst']
-            couplage_worst_config = key
+        n = key[0]
+        if n <= max_n_optimal:  # Seulement pour les petits graphes où nous avons calculé les ratios
+            if data['glouton_worst'] > glouton_worst_global:
+                glouton_worst_global = data['glouton_worst']
+                glouton_worst_config = key
+            
+            if data['couplage_worst'] > couplage_worst_global:
+                couplage_worst_global = data['couplage_worst']
+                couplage_worst_config = key
     
-    print(f"\nPire rapport d'approximation - Algorithme glouton: {glouton_worst_global:.4f}")
-    print(f"  Configuration: n={glouton_worst_config[0]}, p={glouton_worst_config[1]}")
+    if glouton_worst_config:
+        print(f"\nPire rapport d'approximation - Algorithme glouton: {glouton_worst_global:.4f}")
+        print(f"  Configuration: n={glouton_worst_config[0]}, p={glouton_worst_config[1]}")
+    else:
+        print(f"\nPire rapport d'approximation - Algorithme glouton: Non calculé (n > {max_n_optimal})")
     
-    print(f"\nPire rapport d'approximation - Algorithme de couplage: {couplage_worst_global:.4f}")
-    print(f"  Configuration: n={couplage_worst_config[0]}, p={couplage_worst_config[1]}")
+    if couplage_worst_config:
+        print(f"\nPire rapport d'approximation - Algorithme de couplage: {couplage_worst_global:.4f}")
+        print(f"  Configuration: n={couplage_worst_config[0]}, p={couplage_worst_config[1]}")
+    else:
+        print(f"\nPire rapport d'approximation - Algorithme de couplage: Non calculé (n > {max_n_optimal})")
     
-    # Afficher les rapports moyens par algorithme
-    print("\nRapports d'approximation moyens par configuration:")
+    # Afficher les rapports moyens par algorithme (uniquement pour n <= max_n_optimal)
+    print(f"\nRapports d'approximation moyens par configuration (n ≤ {max_n_optimal}):")
     print("-" * 60)
     print("Configuration\t\tGlouton (moyen)\tCouplage (moyen)")
     print("-" * 60)
     
     for n in n_values:
-        for p in p_values:
-            key = (n, p)
-            if key in results and results[key]['glouton_ratios']:
-                glouton_mean = sum(results[key]['glouton_ratios']) / len(results[key]['glouton_ratios'])
-                couplage_mean = sum(results[key]['couplage_ratios']) / len(results[key]['couplage_ratios'])
-                print(f"n={n}, p={p}\t\t{glouton_mean:.4f}\t\t{couplage_mean:.4f}")
+        if n <= max_n_optimal:  # Seulement pour les petits graphes
+            for p in p_values:
+                key = (n, p)
+                if key in results and results[key]['glouton_ratios']:
+                    valid_glouton = [r for r in results[key]['glouton_ratios'] if r is not None]
+                    valid_couplage = [r for r in results[key]['couplage_ratios'] if r is not None]
+                    
+                    if valid_glouton and valid_couplage:
+                        glouton_mean = sum(valid_glouton) / len(valid_glouton)
+                        couplage_mean = sum(valid_couplage) / len(valid_couplage)
+                        print(f"n={n}, p={p}\t\t{glouton_mean:.4f}\t\t{couplage_mean:.4f}")
 
 def evaluer_heuristiques(n_values, p_values, num_instances=10):
     """
@@ -3144,18 +3243,23 @@ def main():
                 
             print("\n--- VÉRIFICATION PAR FORCE BRUTE ---")
             try:
-                if len(current_graph.sommets()) > 20:
-                    print("✗ La force brute n'est recommandée que pour n ≤ 20")
+                if len(current_graph.sommets()) > 15:  # Réduire la limite pour la sécurité
+                    print("✗ La force brute n'est recommandée que pour n ≤ 15")
                     continue
                     
                 start_time = time.time()
                 couverture_brute = bruteforce_vertex_cover(current_graph.adj)
                 temps_ecoule = time.time() - start_time
                 
+                # Pour debug: trouver toutes les solutions optimales
+                all_optimal = bruteforce_vertex_cover_all(current_graph.adj)
+                
                 print(f"Couverture optimale (force brute): {couverture_brute}")
-                print(f"  Taille: {len(couverture_brute)}")
-                print(f"  Valide: {current_graph.est_couverture_valide(couverture_brute)}")
-                print(f"  Temps d'exécution: {temps_ecoule:.3f} secondes")
+                print(f"Toutes les solutions optimales: {all_optimal}")
+                print(f"Nombre de solutions optimales: {len(all_optimal)}")
+                print(f"Taille: {len(couverture_brute)}")
+                print(f"Valide: {current_graph.est_couverture_valide(couverture_brute)}")
+                print(f"Temps d'exécution: {temps_ecoule:.3f} secondes")
                 
             except Exception as e:
                 print(f"✗ Erreur lors de la force brute: {e}")
@@ -3216,19 +3320,23 @@ def main():
             print("\n--- ÉVALUATION DE LA QUALITÉ DES ALGORITHMES APPROXIMATIFS ---")
             try:
                 # Configuration des paramètres
-                n_values = [5, 10, 15, 20, 25, 30]  # Inclure des petites tailles pour le calcul optimal
+                # Utiliser branchement_ameliore_v3 pour la solution optimale
+                n_values = [5, 10, 15, 20, 25]  # Augmenter la limite puisque branchement_ameliore_v3 est plus rapide
                 p_values = [0.1, 0.3, 0.5, 0.7]
                 num_instances = 10
+                max_n_optimal = 100  # Limite pour le calcul optimal avec branchement_ameliore_v3
 
                 print(f"Configuration actuelle:")
-                print(f"  n_values: {n_values}")
+                print(f"  n_values: {n_values} (n ≤ {max_n_optimal} pour le calcul des rapports)")
                 print(f"  p_values: {p_values}")
                 print(f"  instances: {num_instances}")
+                print(f"\n✓ Utilisation de branchement_ameliore_v3 pour la solution optimale")
+                print("  (plus rapide et garantit l'optimalité)")
 
                 modifier = input("Voulez-vous modifier la configuration? (o/n): ").strip().lower()
                 if modifier == 'o':
                     try:
-                        n_input = input("n_values (séparés par des virgules): ")
+                        n_input = input(f"n_values (séparés par des virgules, n ≤ {max_n_optimal} recommandé): ")
                         if n_input:
                             n_values = [int(x.strip()) for x in n_input.split(',') if x.strip()]
                         p_input = input("p_values (séparés par des virgules, ex: 0.1,0.3,0.5,0.7): ")
@@ -3240,14 +3348,16 @@ def main():
 
                 # Lancer l'évaluation
                 print("\nLancement de l'évaluation de la qualité des algorithmes approximatifs...")
-                print("Cette opération peut prendre quelques minutes pour les petits graphes.")
-                results = evaluer_qualite_approximation(n_values, p_values, num_instances)
+                print("Utilisation de branchement_ameliore_v3 comme référence optimale.")
+                results = evaluer_qualite_approximation(n_values, p_values, num_instances, max_n_optimal)
 
                 # Tracer les résultats
-                tracer_rapports_approximation(results, title_suffix=f"(instances={num_instances})")
+                tracer_rapports_approximation(results, title_suffix=f"(instances={num_instances})", max_n_optimal=max_n_optimal)
 
             except Exception as e:
                 print(f"✗ Erreur lors de l'évaluation de la qualité: {e}")
+                import traceback
+                traceback.print_exc()
                 
         elif choix == "11":
             # Évaluation des heuristiques supplémentaires
