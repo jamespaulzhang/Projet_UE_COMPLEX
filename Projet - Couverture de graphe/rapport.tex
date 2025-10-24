@@ -14,12 +14,22 @@
 \usepackage{amsthm}
 
 \usetikzlibrary{positioning,shapes,arrows}
+
+% 设置页边距
 \geometry{margin=2cm}
+
+% 设置段落间距和缩进
 \setlength{\parskip}{0.5em}
 \setlength{\parindent}{0em}
+
+% 设置行距
 \onehalfspacing
+
+% 设置标题间距
 \titlespacing*{\section}{0pt}{0.5em}{0.3em}
 \titlespacing*{\subsection}{0pt}{0.3em}{0.2em}
+
+% 设置列表间距
 \setlist[itemize]{noitemsep, topsep=0pt, parsep=0pt, partopsep=0pt}
 \setlist[enumerate]{noitemsep, topsep=0pt, parsep=0pt, partopsep=0pt}
 
@@ -103,7 +113,6 @@ Considérons 5 sommets notés \(a,b,c,d,e\), les arêtes sont \((a,b),(b,c),(c,d
         \draw (c) -- (d);
         \draw (d) -- (e);
     \end{tikzpicture}
-    \caption{Graphe d'exemple (chemin à 5 sommets) illustrant la non-optimalité de l'algorithme glouton.}
 \end{figure}
 
 \textbf{Exécution de l'algorithme glouton (stratégie : sommet de degré maximal).}  
@@ -210,16 +219,9 @@ une \textbf{pile} pour g\'erer les nœuds de l’arbre (structure LIFO) ; chaque
 pile est un couple \texttt{(remaining\_edges, current\_solution)}. Pour limiter la surcharge
 m\'emoire nous ne stockons pas une copie compl\`ete du graphe \`a chaque nœud mais la liste
 des ar\^etes restantes et l’ensemble partiel de sommets choisis. La m\'ethode renvoie la
-meilleure couverture rencontr\'ee ainsi qu’un compteur du nombre de nœuds g\'en\'er\'es
+meilleure couverture rencontr\'ee (\texttt{best\_C})
+ainsi qu’un compteur du nombre de nœuds g\'en\'er\'es
 (\texttt{nodes\_generated}).
-
-\paragraph{Point d’impl\'ementation}
-Les fonctions principales utilis\'ees sont :
-\begin{itemize}
-  \item \texttt{Graph.aretes()} : extraits la liste des ar\^etes actuelles (format liste de paires),
-  \item \texttt{Graph.est\_couverture\_valide(C)} : v\'erifie qu’un ensemble $C$ couvre toutes les ar\^etes,
-  \item \texttt{Graph.branchement\_simple()} : exploration par pile, renvoie \texttt{(best\_C, nodes\_generated)}.
-\end{itemize}
 
 \subsubsection{Vérification sur exemples simples}
 
@@ -255,7 +257,7 @@ Les résultats confirment la complexité exponentielle théorique $O(2^n)$ du br
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.8\linewidth]{Figure_1.png}
-  \caption{Croissance exponentielle du temps et des nœuds générés}
+  \caption{Analyse de la complexité du branchement simple : croissance exponentielle du temps d'exécution et des nœuds généré}
   \label{fig:branchtime}
 \end{figure}
 
@@ -300,56 +302,53 @@ Ainsi, toute couverture vérifie $|C|\ge b_3$.
 \paragraph{Stratégies implémentées}
 Conformément aux exigences du projet, nous avons évalué six stratégies combinant solutions réalisables (couplage et glouton) et bornes inférieures :
 \begin{itemize}
-  \item \textbf{Simple} : référence sans optimisation
-  \item \textbf{Couplage seul} : solution réalisable par couplage maximal
-  \item \textbf{Bornes seules} : élagage par les trois bornes inférieures
-  \item \textbf{Couplage + bornes} : combinaison recommandée
-  \item \textbf{Glouton seul} : solution réalisable gloutonne
-  \item \textbf{Glouton + bornes} : alternative avec heuristique gloutonne
+  \item \textbf{Branchement Simple} : référence sans optimisation, servant de baseline avec complexité exponentielle
+  \item \textbf{Branchement Couplage seul} : utilise uniquement la solution réalisable par couplage maximal
+  \item \textbf{Branchement Bornes seules} : élagage exclusivement par les trois bornes inférieures
+  \item \textbf{Branchement Couplage + bornes} : combinaison synergique recommandée
+  \item \textbf{Branchement Glouton seul} : utilise la solution gloutonne comme réalisable initiale  
+  \item \textbf{Branchement Glouton + bornes} : alternative combinant l'heuristique gloutonne avec l'élagage
 \end{itemize}
 
-\paragraph{Résultats expérimentaux}
-L'évaluation sur $n \in \{8,\dots,16\}$ avec différentes densités révèle que :
+\paragraph{Synthèse des performances}
+L'évaluation comparative des six stratégies d'optimisation révèle des conclusions claires :
 
 \begin{itemize}
-  \item \textbf{Couplage + bornes} est optimal, réduisant jusqu'à 90\% des nœuds explorés
-  \item Les \textbf{bornes seules} améliorent significativement l'élagage
-  \item Le \textbf{couplage seul} fournit de bons incumbents initiaux
-  \item Le \textbf{glouton} offre une alternative compétitive aux solutions réalisables
+  \item \textbf{Performance temporelle} : \textbf{Bornes seules} > \textbf{Couplage+bornes} > \textbf{Glouton+bornes} > \textbf{Couplage seul} > \textbf{Glouton seul} > \textbf{Branchement simple}
+  
+  \item \textbf{Réduction des nœuds} : Les stratégies avec bornes (\textbf{Couplage+bornes}, \textbf{Glouton+bornes}, \textbf{Bornes seules}) réduisent >85\% des nœuds explorés
+\end{itemize}
+
+\paragraph{Analyse conclusive}
+\begin{itemize}
+  \item Les \textbf{bornes inférieures} sont l'optimisation la plus efficace, réduisant drastiquement l'espace de recherche
+  \item La combinaison avec des \textbf{solutions réalisables} améliore davantage l'élagage
+  \item Le \textbf{couplage} est préférable au \textbf{glouton} pour sa complexité constante et sa qualité garantie
+  \item Les stratégies sans bornes (\textbf{Couplage seul}, \textbf{Glouton seul}) offrent des gains limités
 \end{itemize}
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.8\linewidth]{comparasion_tous.png}
-  \caption{Performance comparative des stratégies d'optimisation}
+  \caption{Comparaison des six stratégies de branchement : temps d'exécution et nœuds générés}
 \end{figure}
-
-\paragraph{Analyse et validation}
-Cette étude répond aux questions 4.2.2 et 4.2.3 :
-\begin{itemize}
-  \item L'insertion des bornes et solutions réalisables améliore radicalement l'efficacité
-  \item La combinaison \textbf{couplage + bornes} est recommandée pour son efficacité
-  \item L'algorithme glouton constitue une alternative valable aux solutions réalisables
-  \item Les bornes seules apportent déjà une amélioration substantielle
-\end{itemize}
-
-La stratégie optimale combine l'élagage agressif des bornes inférieures avec des solutions réalisables de qualité pour guider la recherche.
 
 \subsection{Amélioration du branchement (versions v1, v2, v3)}
 
 \paragraph{Description des améliorations}
-Nous avons développé trois versions améliorées :
-\begin{itemize}
-  \item \textbf{v1} : Branchement amélioré de base
-  \item \textbf{v2} : Sélection du sommet de degré maximal comme pivot
-  \item \textbf{v3} : Réduction des sommets de degré 1 + sélection optimisée
-\end{itemize}
+Nous avons développé trois versions améliorées du branchement, chacune introduisant des heuristiques spécifiques :
 
-\subsubsection{Explication théorique pour v3}
+\begin{itemize}
+  \item \textbf{Version 1 - Branchement asymétrique} : Évite la redondance en sélectionnant dans la seconde branche le sommet $v$ et tous les voisins de $u$, réduisant ainsi la symétrie dans l'arbre de recherche.
+  
+  \item \textbf{Version 2 - Sélection par degré maximal} : Améliore v1 en sélectionnant systématiquement l'arête contenant le sommet de degré maximal, maximisant la réduction du graphe à chaque étape.
+  
+  \item \textbf{Version 3 - Traitement optimal des sommets de degré 1} : Combine v2 avec un prétraitement agressif des sommets de degré 1, appliquant une règle d'optimalité locale avant le branchement principal.
+\end{itemize}
 
 Dans un graphe $G$, si un sommet $u$ est de degré 1, alors il existe toujours une couverture optimale qui ne contient pas $u$.
 
-\paragraph{}{Preuve}
+\paragraph{Preuve}
 Soit $u$ un sommet de degré 1 et $v$ son unique voisin. Considérons deux cas :
 
 \begin{enumerate}
@@ -367,30 +366,21 @@ La figure \ref{fig:comparaison_versions} montre la comparaison détaillée des t
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.95\linewidth]{v1_vs_v2_vs_v3.png}
-  \caption{Comparaison des versions améliorées : temps, qualité et nœuds générés}
+  \caption{Comparaison des trois versions améliorées : temps d'exécution, qualité des solutions, nœuds générés et ratios de performance}
   \label{fig:comparaison_versions}
 \end{figure}
 
 \subparagraph{Analyse des performances}
 \begin{itemize}
-  \item \textbf{v3 (degré 1)} montre les meilleures performances globales
-  \item \textbf{v2 (degré max)} est efficace sur les graphes denses
-  \item \textbf{v1} apporte une amélioration modérée par rapport au branchement simple
-\end{itemize}
-
-\subparagraph{Qualité des solutions}
-Toutes les versions maintiennent l'optimalité des solutions :
-\begin{itemize}
-  \item Taille moyenne de couverture identique entre les versions
-  \item Validité à 100\% sur toutes les instances testées
+  \item \textbf{v3 (degré 1)} : Performance temporelle optimale, génère environ 50\% moins de nœuds que v1 et v2
+  \item \textbf{v2 (degré max)} : Performance intermédiaire, parfois légèrement plus lent que v1
+  \item \textbf{v1} : Amélioration modérée mais constante, utile comme référence
 \end{itemize}
 
 \subparagraph{Efficacité de la réduction}
-La version v3 excelle particulièrement :
 \begin{itemize}
-  \item Élimination systématique des sommets de degré 1
-  \item Réduction précoce de la taille du graphe
-  \item Nombre de nœuds générés réduit de 60-80\% par rapport à v1
+  \item \textbf{v3} : Réduction drastique des nœuds (environ 50\% moins que v1) grâce au prétraitement des degrés 1
+  \item \textbf{v2 et v1} : Nombre de nœuds générés similaire, avec un léger avantage pour v2
 \end{itemize}
 
 \subsection{Qualité des algorithmes approchés}
@@ -428,7 +418,7 @@ Couplage & 1.367 & 2.000 \\
 \paragraph{Analyse}
 \begin{itemize}
   \item \textbf{Glouton} : n’est pas un algorithme $r$-approximatif garanti, et peut donc être instable dans certains cas pathologiques.  
-  Néanmoins, il fournit presque toujours des solutions très proches de l’optimal (rapport $\approx$ 1.02–1.07), bien meilleures que celles du couplage sur la majorité des graphes testés.
+  Néanmoins, il fournit presque toujours des solutions très proches de l’optimal (rapport $\approx$ 1.02–1.25), bien meilleures que celles du couplage sur la majorité des graphes testés.
   \item \textbf{Couplage} : garantit un facteur 2 en théorie, mais se révèle bien plus performant en pratique.  
   Son rapport moyen diminue avec la taille $n$ et la densité $p$ : lorsque le graphe devient grand et dense, les rapports moyens et pires cas tendent vers 1.
 \end{itemize}
